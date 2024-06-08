@@ -1,7 +1,6 @@
 // cron.js
 
 const cron = require('node-cron');
-const { db } = require('lib/db.ts');
 
 // Function to schedule auction closure
 const scheduleAuctionClosure = (auctionItemId) => {
