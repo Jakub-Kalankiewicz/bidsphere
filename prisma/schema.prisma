@@ -1,0 +1,92 @@
+// prisma/schema.prisma
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+model User {
+  id               String            @id @default(auto()) @map("_id") @db.ObjectId
+  name             String?
+  bids             Bid[]
+  finishedAuctions FinishedAuction[]
+  email            String?           @unique
+  emailVerified    DateTime?
+  image            String?
+  role             UserRole          @default(USER)
+  accounts         Account[]
+}
+
+model Account {
+  id                String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String  @db.ObjectId
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.String
+  access_token      String? @db.String
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.String
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+enum AuctionStatus {
+  OPEN
+  CLOSED
+  CANCELED
+  NOT_STARTED
+}
+
+model FinishedAuction {
+  id         String @id @default(auto()) @map("_id") @db.ObjectId
+  auctionId  String @db.ObjectId
+  userId     String @db.ObjectId
+  finalPrice Float
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AuctionItem {
+  id            String        @id @default(auto()) @map("_id") @db.ObjectId
+  name          String
+  startingPrice Float
+  currentPrice  Float
+  pathToImage   String
+  pathToCanvas  String
+  description   String
+  startTime     DateTime?
+  endTime       DateTime?
+  status        AuctionStatus @default(NOT_STARTED)
+  bids          Bid[]
+  lastBidId     String?       @db.ObjectId
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+}
+
+model Bid {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  auctionItemId String   @db.ObjectId
+  userId        String   @db.ObjectId
+  amount        Float
+  createdAt     DateTime @default(now())
+
+  auction AuctionItem @relation(fields: [auctionItemId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([auctionItemId, userId])
+  @@index([createdAt])
+}
