@@ -3,31 +3,33 @@
 import { getItemData } from "@/actions/getItemData";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { useParams } from "next/navigation";
-import React, {
-  LegacyRef,
-  useEffect,
-  useRef,
-  useState,
-  useTransition,
-} from "react";
+import React, { useEffect, useRef, useState, useTransition } from "react";
 import { ClipLoader } from "react-spinners";
 import { toast } from "sonner";
 import AuctionItemCard from "./_components/AuctionItemCard";
 import InitialItemCard from "./_components/InitialItemCard";
 import { AuctionItem } from "../../_types";
 import { AuctionStatus } from "@prisma/client";
-import { DefaultCanvas } from "@/components/3D/canvas";
+import { DefaultCanvas } from "@/components/3D_THREE/canvas";
+import DefaultCavasBabylon from "@/components/3D_BABYLON/canvas/DefaultCanvas";
 import { Button } from "@/components/ui/button";
 import { MdOutlineLightMode, MdLightMode } from "react-icons/md";
 import { CameraControls } from "@react-three/drei";
+import { ArcRotateCamera, Vector3 } from "@babylonjs/core";
 
 const ItemPage = () => {
   const params = useParams<{ itemId: string }>();
   const itemId = params.itemId;
   const [auctionItemData, setAuctionItemData] = useState<AuctionItem>();
   const [isPending, startTransition] = useTransition();
-  const [lightIntensity, setLightIntensity] = useState(5);
+  const [lightIntensity, setLightIntensity] = useState(3);
   const cameraControlsRef = useRef<CameraControls>(null);
+  const [renderThree, setRenderThree] = useState(true);
+  const [camera, setCamera] = useState<{
+    camera: ArcRotateCamera;
+    cameraPosition: Vector3;
+    cameraTarget: Vector3;
+  }>();
 
   const handleIntensityChange = (increment: boolean) => {
     setLightIntensity((prev) =>
@@ -53,8 +55,13 @@ const ItemPage = () => {
   }, []);
 
   const handleResetCamera = () => {
-    if (cameraControlsRef.current) {
-      cameraControlsRef.current.reset(true);
+    if (renderThree) {
+      if (cameraControlsRef.current) {
+        cameraControlsRef.current.reset(true);
+      }
+    } else if (camera) {
+      camera.camera.setTarget(camera.cameraTarget);
+      camera.camera.setPosition(camera.cameraPosition);
     }
   };
 
@@ -72,19 +79,30 @@ const ItemPage = () => {
                   <MdOutlineLightMode className="w-5 h-5" />
                 </Button>
                 <Button onClick={handleResetCamera}>Reset</Button>
+                <Button onClick={() => setRenderThree((prev) => !prev)}>
+                  Change Renderer
+                </Button>
               </div>
-              <DefaultCanvas
-                pathToCanvas={auctionItemData.pathToCanvas}
-                lightIntensity={lightIntensity}
-                cameraControlsRef={cameraControlsRef}
-              />
+              {renderThree ? (
+                <DefaultCanvas
+                  pathToCanvas={auctionItemData.pathToCanvas}
+                  lightIntensity={lightIntensity}
+                  cameraControlsRef={cameraControlsRef}
+                />
+              ) : (
+                <DefaultCavasBabylon
+                  pathToCanvas={auctionItemData.pathToCanvas}
+                  lightIntensity={lightIntensity}
+                  setCamera={setCamera}
+                />
+              )}
             </>
           ) : null}
         </div>
       </div>
       <div className="basis-2/5 flex justify-center items-center flex-col h-full">
         <Card className="2xl:h-3/5 2xl:w-1/2 h-4/5 w-9/12 shadow-2xl mt-24 2xl:mt-0 shadow-sky-300">
-          <CardContent className="flex flex-col justify-center items-center gap-y-5 mt-4">
+          <CardContent className="flex flex-col justify-center items-center gap-y-5 mt-4 h-full">
             {!isPending ? (
               <>
                 {auctionItemData ? (

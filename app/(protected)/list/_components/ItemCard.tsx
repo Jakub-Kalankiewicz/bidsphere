@@ -28,11 +28,12 @@ const ItemCard = ({
   status,
 }: ItemCardProps) => {
   const router = useRouter();
+
   const timeToEnd = endTime && formatTimeRemaining(endTime);
   return (
     <Tilt className="p-5 rounded-2xl sm:w-[360px] w-full">
       <Card
-        onClick={() => router.push(`/list/${id}`)}
+        onClick={() => {console.log('test');router.push(`/list/${id}`)}}
         className="cursor-pointer flex flex-col h-[30rem] text-sky-300 hover:bg-sky-100/30 transition-all duration-1000 ease-in-out hover:text-sky-800"
       >
         <div className="w-full flex justify-center p-6">

@@ -1,11 +1,4 @@
-import React, {
-  LegacyRef,
-  RefObject,
-  Suspense,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import React, { LegacyRef, Suspense, useEffect, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 
 import { useGLTF, Preload, CameraControls } from "@react-three/drei";
@@ -43,6 +36,7 @@ const Default = ({
       const scale = desiredMaxDimension / maxDimension;
 
       groupRef.current.scale.set(scale, scale, scale);
+
       center.y -= size.y * 0.5 * scale;
       groupRef.current.position.copy(center);
     }
