@@ -1,9 +1,8 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { formatTimeRemaining } from "@/lib/utils";
-import { AuctionStatus } from "@prisma/client";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Tilt } from "react-tilt";
+import Tilt from "react-parallax-tilt";
 
 interface ItemCardProps {
   id: string;
@@ -33,7 +32,7 @@ const ItemCard = ({
   return (
     <Tilt className="p-5 rounded-2xl sm:w-[360px] w-full">
       <Card
-        onClick={() => {console.log('test');router.push(`/list/${id}`)}}
+        onClick={() => router.push(`/list/${id}`)}
         className="cursor-pointer flex flex-col h-[30rem] text-sky-300 hover:bg-sky-100/30 transition-all duration-1000 ease-in-out hover:text-sky-800"
       >
         <div className="w-full flex justify-center p-6">

@@ -3,7 +3,6 @@
 import { deleteItem } from "@/actions/deleteItem";
 import { startAuction } from "@/actions/startAuction";
 import { Button } from "@/components/ui/button";
-import { CardContent } from "@/components/ui/card";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { AuctionStatus, UserRole } from "@prisma/client";
 import { useRouter } from "next/navigation";
@@ -45,7 +44,7 @@ const InitialItemCard: React.FC<InitialItemCardProps> = ({
   refetchData,
   status,
 }: InitialItemCardProps) => {
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [auctionStartLoading, setAuctionStartLoading] =
     useState<boolean>(false);
   const [deleteLoading, setDeleteLoading] = useState<boolean>(false);
@@ -68,10 +67,7 @@ const InitialItemCard: React.FC<InitialItemCardProps> = ({
             toast.success("Auction started successfully");
           }
         })
-        .catch((error: any) => {
-          console.log(error);
-          toast.error("Something went wrong!");
-        });
+        .catch(() => toast.error("Something went wrong!"));
     });
   };
 

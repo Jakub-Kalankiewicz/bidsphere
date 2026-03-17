@@ -11,12 +11,10 @@ export const AdminSchema = z.object({
     .string()
     .min(3, { message: "Name must be at least 3 characters long" })
     .max(255, { message: "Name must be at most 255 characters long" }),
-  startingPrice: z.preprocess((val) => {
-    // Attempt to parse the input value as a number
-    const parsed = Number(val);
-    // Return the parsed number if it's a valid number, otherwise return the original value
-    return isNaN(parsed) ? val : parsed;
-  }, z.number().min(1, { message: "Price must be at least 1" }).max(1000000, { message: "Price must be at most 1000000" })),
+  startingPrice: z.coerce
+    .number()
+    .min(1, { message: "Price must be at least 1" })
+    .max(1000000, { message: "Price must be at most 1000000" }),
   pathToImage: z.string().min(1, { message: "Path to image is required" }),
   pathToCanvas: z.string().min(1, { message: "Path to canvas is required" }),
   description: z
@@ -33,11 +31,6 @@ export const StartAuctionSchema = z.object({
 });
 
 export const BidSchema = z.object({
-  amount: z.preprocess((val) => {
-    // Attempt to parse the input value as a number
-    const parsed = Number(val);
-    // Return the parsed number if it's a valid number, otherwise return the original value
-    return isNaN(parsed) ? val : parsed;
-  }, z.number().min(1, { message: "Amount must be at least 1" })),
+  amount: z.coerce.number().min(1, { message: "Amount must be at least 1" }),
   auctionId: z.string(),
 });

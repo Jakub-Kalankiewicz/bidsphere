@@ -1,6 +1,9 @@
 // cron.js
 
 const cron = require('node-cron');
+const { PrismaClient, AuctionStatus } = require('@prisma/client');
+
+const db = new PrismaClient();
 
 // Function to schedule auction closure
 const scheduleAuctionClosure = (auctionItemId) => {

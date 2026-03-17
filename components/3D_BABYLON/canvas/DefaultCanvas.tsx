@@ -142,13 +142,12 @@ const DefaultCanvasBabylon: FC<DefaultCanvasProps> = ({
       scene.render();
     });
 
-    window.addEventListener("resize", () => {
-      engine.resize();
-    });
+    const handleResize = () => engine.resize();
+    window.addEventListener("resize", handleResize);
 
     return () => {
       engine.dispose();
-      window.removeEventListener("resize", () => engine.resize());
+      window.removeEventListener("resize", handleResize);
     };
   }, [pathToCanvas, lightIntensity, setCamera]);
 

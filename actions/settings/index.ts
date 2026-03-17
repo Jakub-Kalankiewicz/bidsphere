@@ -28,13 +28,13 @@ export const settings = async (values: z.infer<typeof SettingsSchema>) => {
     },
   });
 
-  if (!updatedUser || !updatedUser.name) {
+  if (!updatedUser) {
     return { error: "Failed to update settings" };
   }
 
   unstable_update({
     user: {
-      name: updatedUser.name,
+      name: updatedUser.name ?? "",
       role: updatedUser.role,
     },
   });

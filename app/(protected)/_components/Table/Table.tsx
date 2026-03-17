@@ -1,20 +1,13 @@
 "use client";
 
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { columns } from "./columns";
 import { DataTable } from "./DataTable";
-import { payments } from "./example";
 import { useEffect, useState, useTransition } from "react";
-import { Button } from "@/components/ui/button";
 import { getHistory } from "@/actions/getHistory";
 import { toast } from "sonner";
 import { HistoryItem } from "../../_types";
-import { set } from "zod";
 
 export const Table = () => {
-  const params = useSearchParams();
-  const pathname = usePathname();
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isEmpty, setIsEmpty] = useState(false);
   const [data, setData] = useState<HistoryItem[]>();
@@ -50,7 +43,7 @@ export const Table = () => {
         }
       });
     });
-  }, [params]);
+  }, []);
   return (
     <div className="container mx-auto py-10">
       {data && !isEmpty ? (

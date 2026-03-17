@@ -20,7 +20,7 @@ export const getNewestItems = async () => {
 
   const items = await db.auctionItem.findMany({
     where: {
-      status: AuctionStatus.NOT_STARTED || AuctionStatus.OPEN,
+      status: { in: [AuctionStatus.NOT_STARTED, AuctionStatus.OPEN] },
     },
     orderBy: {
       createdAt: "desc",

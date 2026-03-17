@@ -66,7 +66,7 @@ const HomePage = () => {
       >
         <CarouselContent>
           {data && data.length > 0 ? (
-            data.map((item) => <CarouselItemCard key={item.id} data={item} />)
+            data.map((item, index) => <CarouselItemCard key={item.id} data={item} priority={index === 0} />)
           ) : (
             <div className="text-white text-2xl font-semibold ml-28">
               No items found

@@ -36,34 +36,26 @@ export const bid = async (values: z.infer<typeof BidSchema>) => {
   }
 
   if (validatedFields.data.amount <= auctionItem.currentPrice) {
-    return { error: "Bid amount is less or equal the starting price" };
+    return { error: "Bid amount must be greater than the current price" };
   }
 
-  if (validatedFields.data.amount <= auctionItem.startingPrice) {
-    return { error: "Bid amount is less or equal the current price" };
-  }
+  await db.$transaction(async (tx) => {
+    const newBid = await tx.bid.create({
+      data: {
+        auctionItemId: validatedFields.data.auctionId,
+        userId: user.id!,
+        amount: validatedFields.data.amount,
+      },
+    });
 
-  const bid = await db.bid.create({
-    data: {
-      auctionItemId: validatedFields.data.auctionId,
-      userId: user.id,
-      amount: validatedFields.data.amount,
-    },
+    await tx.auctionItem.update({
+      where: { id: validatedFields.data.auctionId },
+      data: {
+        currentPrice: validatedFields.data.amount,
+        lastBidId: newBid.id,
+      },
+    });
   });
 
-  await db.auctionItem.update({
-    where: {
-      id: values.auctionId,
-    },
-    data: {
-      currentPrice: validatedFields.data.amount,
-      lastBidId: bid.id,
-    },
-  });
-
-  if (!bid) {
-    return { error: "Failed to create bid" };
-  }
-
-  return { success: "Succcess" };
+  return { success: "Bid placed successfully!" };
 };

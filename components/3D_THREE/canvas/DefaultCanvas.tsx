@@ -1,4 +1,4 @@
-import React, { LegacyRef, Suspense, useEffect, useRef, useState } from "react";
+import React, { RefObject, Suspense, useEffect, useRef } from "react";
 import { Canvas } from "@react-three/fiber";
 
 import { useGLTF, Preload, CameraControls } from "@react-three/drei";
@@ -9,13 +9,13 @@ import { Box3, Group, Vector3 } from "three";
 interface DefaultProps {
   pathToCanvas: string;
   lightIntensity: number;
-  cameraControlsRef: LegacyRef<CameraControls>;
+  cameraControlsRef: RefObject<CameraControls | null>;
 }
 
 interface DefaultCanvasProps {
   pathToCanvas: string;
   lightIntensity: number;
-  cameraControlsRef: LegacyRef<CameraControls>;
+  cameraControlsRef: RefObject<CameraControls | null>;
 }
 
 const Default = ({

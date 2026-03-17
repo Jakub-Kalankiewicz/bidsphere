@@ -8,10 +8,12 @@ import { AuctionStatus } from "@prisma/client";
 
 interface CarouselItemCardProps {
   data: Item;
+  priority?: boolean;
 }
 
 const CarouselItemCard = ({
   data: { id, name, description, currentPrice, pathToImage, endTime, status },
+  priority = false,
 }: CarouselItemCardProps) => {
   const router = useRouter();
   const timeToEnd = endTime && formatTimeRemaining(endTime);
@@ -34,6 +36,8 @@ const CarouselItemCard = ({
             className="rounded-xl object-fit h-[350px]"
             width={350}
             height={150}
+            priority={priority}
+            loading={priority ? "eager" : "lazy"}
           />
         </div>
         <CardContent className="flex flex-col items-center justify-center">
