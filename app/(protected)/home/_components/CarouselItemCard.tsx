@@ -33,11 +33,13 @@ const CarouselItemCard = ({
           <Image
             src={pathToImage}
             alt={name}
-            className="rounded-xl object-fit h-[350px]"
+            className="rounded-xl object-cover h-[350px]"
             width={350}
             height={150}
             priority={priority}
             loading={priority ? "eager" : "lazy"}
+            placeholder="blur"
+            blurDataURL="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'%3E%3Crect width='100%25' height='100%25' fill='%23cccccc'/%3E%3C/svg%3E"
           />
         </div>
         <CardContent className="flex flex-col items-center justify-center">

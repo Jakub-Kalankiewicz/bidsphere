@@ -3,8 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
-import { UserButton } from "@/components/auth/UserButton";
+
+const UserButton = dynamic(
+  () => import("@/components/auth/UserButton").then((m) => ({ default: m.UserButton })),
+  { ssr: false }
+);
 
 export const Navbar = () => {
   const pathname = usePathname();

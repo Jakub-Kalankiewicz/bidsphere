@@ -6,6 +6,7 @@ import { useEffect, useState, useTransition } from "react";
 import { getHistory } from "@/actions/getHistory";
 import { toast } from "sonner";
 import { HistoryItem } from "../../_types";
+import { ClipLoader } from "react-spinners";
 
 export const Table = () => {
   const [isPending, startTransition] = useTransition();
@@ -46,7 +47,11 @@ export const Table = () => {
   }, []);
   return (
     <div className="container mx-auto py-10">
-      {data && !isEmpty ? (
+      {isPending ? (
+        <div className="flex justify-center items-center h-40">
+          <ClipLoader color="#36d7b7" size={60} />
+        </div>
+      ) : data && !isEmpty ? (
         <DataTable columns={columns} data={data} />
       ) : (
         <div>No history found.</div>

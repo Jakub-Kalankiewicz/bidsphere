@@ -19,6 +19,7 @@ import { AdminSchema } from "@/schemas";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { UserRole } from "@prisma/client";
 import { useState, useTransition } from "react";
+import { BeatLoader } from "react-spinners";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
 import { adminUpload } from "@/actions/admin/upload";
@@ -180,7 +181,7 @@ const AdminUploadPage = () => {
                 />
               </div>
               <Button disabled={isPending} type="submit" size="lg">
-                Upload
+                {isPending ? <BeatLoader color="white" size={8} /> : "Upload"}
               </Button>
             </form>
           </Form>

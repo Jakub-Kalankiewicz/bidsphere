@@ -39,7 +39,7 @@ const ItemCard = ({
           <Image
             src={pathToImage}
             alt={name}
-            className="rounded-xl object-fit h-[250px]"
+            className="rounded-xl object-cover h-[250px]"
             width={300}
             height={150}
             placeholder="blur"
