@@ -7,21 +7,16 @@ import {
   CarouselPrevious,
 } from "@/components/ui/carousel";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useRouter } from "next/navigation";
-import React from "react";
+import Link from "next/link";
 
 const CarouselSkeleton = () => {
-  const router = useRouter();
   return (
     <div className="w-full flex flex-col justify-center items-center gap-10">
       <h2 className="text-center font-semibold text-5xl tracking-wider text-white mt-24">
         Check out our newest{" "}
-        <span
-          className=" text-white underline italic cursor-pointer"
-          onClick={() => router.push("/list")}
-        >
+        <Link href="/list" className="text-white underline italic cursor-pointer">
           Items
-        </span>
+        </Link>
       </h2>
       <Carousel
         className="max-w-[1200px] w-full"

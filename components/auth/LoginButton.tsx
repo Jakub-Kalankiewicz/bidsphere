@@ -1,22 +1,15 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 interface LoginButtonProps {
   children: React.ReactNode;
-  asChild?: boolean;
 }
 
-export const LoginButton = ({ children, asChild }: LoginButtonProps) => {
-  const router = useRouter();
-
-  const onClick = () => {
-    router.push("/auth/login");
-  };
-
+export const LoginButton = ({ children }: LoginButtonProps) => {
   return (
-    <span onClick={onClick} className="cursor-pointer">
+    <Link href="/auth/login" className="cursor-pointer">
       {children}
-    </span>
+    </Link>
   );
 };

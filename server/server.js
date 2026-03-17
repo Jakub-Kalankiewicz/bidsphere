@@ -2,13 +2,15 @@
 
 const express = require('express');
 const next = require('next');
-const cron = require('./cron'); // Require your cron jobs here
+const { startAuctionClosureJob } = require('./cron');
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
+  startAuctionClosureJob();
+
   const server = express();
 
   server.all('/{*path}', (req, res) => {

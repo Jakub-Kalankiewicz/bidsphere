@@ -4,6 +4,7 @@ import { RoleGate } from "@/components/auth/RoleGate";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CldUploadButton } from "next-cloudinary";
+import type { CloudinaryUploadWidgetResults } from "next-cloudinary";
 import {
   Form,
   FormField,
@@ -17,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { AdminSchema } from "@/schemas";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { UserRole } from "@prisma/client";
-import { useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
 import { adminUpload } from "@/actions/admin/upload";
@@ -38,13 +39,17 @@ const AdminUploadPage = () => {
     },
   });
 
-  const handleImageUpload = (result: any) => {
-    setImage(result.info.secure_url);
-    form.setValue("pathToImage", result.info.secure_url);
+  const handleImageUpload = (result: CloudinaryUploadWidgetResults) => {
+    if (typeof result.info === "object" && result.info?.secure_url) {
+      setImage(result.info.secure_url);
+      form.setValue("pathToImage", result.info.secure_url);
+    }
   };
-  const handleCanvasUpload = (result: any) => {
-    setCanvas(result.info.secure_url);
-    form.setValue("pathToCanvas", result.info.secure_url);
+  const handleCanvasUpload = (result: CloudinaryUploadWidgetResults) => {
+    if (typeof result.info === "object" && result.info?.secure_url) {
+      setCanvas(result.info.secure_url);
+      form.setValue("pathToCanvas", result.info.secure_url);
+    }
   };
 
   const onSubmit = (values: z.infer<typeof AdminSchema>) => {

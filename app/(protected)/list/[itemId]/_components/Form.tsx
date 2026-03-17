@@ -15,7 +15,7 @@ import { $Enums } from "@prisma/client";
 import { LastBidderType } from "@/app/(protected)/_types";
 
 interface FormProps {
-  onSubmit: (data: any) => void;
+  onSubmit: (data: { amount: number; auctionId: string }) => void;
   form: UseFormReturn<
     {
       amount: number;

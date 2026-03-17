@@ -5,30 +5,28 @@ const { PrismaClient, AuctionStatus } = require('@prisma/client');
 
 const db = new PrismaClient();
 
-// Function to schedule auction closure
-const scheduleAuctionClosure = (auctionItemId) => {
-  // Schedule a task to close the auction after 24 hours
-  const closureTime = new Date(Date.now() + 1000 * 60 * 60 * 24);
-  const closureCronTime = `${closureTime.getUTCMinutes()} ${closureTime.getUTCHours()} ${closureTime.getUTCDate()} ${closureTime.getUTCMonth() + 1} *`;
+const startAuctionClosureJob = () => {
+  cron.schedule('* * * * *', async () => {
+    try {
+      const result = await db.auctionItem.updateMany({
+        where: {
+          status: AuctionStatus.OPEN,
+          endTime: { lt: new Date() },
+        },
+        data: {
+          status: AuctionStatus.CLOSED,
+        },
+      });
 
-  cron.schedule(closureCronTime, async () => {
-    const auctionItem = await db.auctionItem.update({
-      where: {
-        id: auctionItemId,
-      },
-      data: {
-        status: AuctionStatus.CLOSED,
-      },
-    });
-
-    if (auctionItem) {
-      console.log(`Auction with ID ${auctionItemId} has been closed.`);
-    } else {
-      console.log(`Failed to close auction with ID ${auctionItemId}.`);
+      if (result.count > 0) {
+        console.log(`Closed ${result.count} auction(s).`);
+      }
+    } catch (error) {
+      console.error('Auction closure job failed:', error);
     }
   });
+
+  console.log('Auction closure job started.');
 };
 
-module.exports = {
-  scheduleAuctionClosure,
-};
+module.exports = { startAuctionClosureJob };

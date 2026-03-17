@@ -26,7 +26,7 @@ export default function LandingPage() {
           </span>
         </h1>
         <div>
-          <LoginButton asChild>
+          <LoginButton>
             <Button variant="primary" size="xl">
               Sign In
             </Button>

@@ -2,13 +2,12 @@
 
 "use server";
 
-import { AuctionItem, AuctionStatus } from "@prisma/client";
+import { AuctionStatus } from "@prisma/client";
 import * as z from "zod";
 import { db } from "@/lib/db";
 import { getUserById } from "@/data/user";
 import { currentRole, currentUser } from "@/lib/auth";
 import { StartAuctionSchema } from "@/schemas";
-import { scheduleAuctionClosure } from "@/server/cron";
 
 export const startAuction = async (
   values: z.infer<typeof StartAuctionSchema>
@@ -63,9 +62,6 @@ export const startAuction = async (
       return { error: "Failed to start auction" };
     }
 
-    // Schedule the closure of the auction
-    scheduleAuctionClosure(auctionItem.id);
-
     return { success: auctionItem };
   } else {
     const auctionItem = await db.auctionItem.update({
@@ -94,9 +90,6 @@ export const startAuction = async (
     if (!bids) {
       return { error: "Failed to start auction" };
     }
-
-    // Schedule the closure of the auction
-    scheduleAuctionClosure(auctionItem.id);
 
     return { success: auctionItem };
   }

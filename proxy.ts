@@ -13,7 +13,7 @@ import {
 const { auth } = NextAuth(authConfig);
 
 const matchesDynamicPath = (path: string, patterns: string[]): boolean => {
-  return patterns.some((pattern: string) => new RegExp(pattern).test(path));
+  return patterns.some((pattern: string) => new RegExp(`^${pattern}$`).test(path));
 };
 
 export default auth((req) => {
