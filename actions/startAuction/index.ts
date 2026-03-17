@@ -1,5 +1,3 @@
-// startAuction.js
-
 "use server";
 
 import { AuctionStatus } from "@prisma/client";

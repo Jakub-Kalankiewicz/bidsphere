@@ -1,11 +1,4 @@
-import React, {
-  Dispatch,
-  FC,
-  SetStateAction,
-  Suspense,
-  useEffect,
-  useRef,
-} from "react";
+import { Dispatch, FC, SetStateAction, useEffect, useRef } from "react";
 import {
   Engine,
   Scene,
@@ -17,7 +10,6 @@ import {
   Mesh,
 } from "@babylonjs/core";
 import "@babylonjs/loaders";
-import CanvasLoader from "../../3D_THREE/Loader";
 
 interface DefaultCanvasProps {
   pathToCanvas: string;
@@ -152,12 +144,10 @@ const DefaultCanvasBabylon: FC<DefaultCanvasProps> = ({
   }, [pathToCanvas, lightIntensity, setCamera]);
 
   return (
-    <Suspense fallback={<CanvasLoader />}>
-      <canvas
-        ref={canvasRef}
-        style={{ width: "100%", height: "100%", display: "block" }}
-      />
-    </Suspense>
+    <canvas
+      ref={canvasRef}
+      style={{ width: "100%", height: "100%", display: "block" }}
+    />
   );
 };
 

@@ -6,8 +6,11 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 
-export const formatTimeRemaining = (endTime: Date) => {
+export const formatTimeRemaining = (endTime: Date): string | null => {
   const timeDifference = new Date(endTime).getTime() - new Date().getTime();
+
+  if (timeDifference <= 0) return null;
+
   const minutes = Math.floor(timeDifference / 60000);
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
