@@ -142,12 +142,7 @@ const BenchmarkPage = () => {
             <div className="overflow-y-auto flex-1 min-h-0 space-y-4 pr-1">
               {results.map((r, i) => (
                 <div key={i} className="rounded-lg border p-4 space-y-2">
-                  <div className="flex justify-between items-center">
-                    <p className="font-semibold">{r.itemName}</p>
-                    <span className="text-xs text-muted-foreground">
-                      {r.fileSizeKb} KB
-                    </span>
-                  </div>
+                  <p className="font-semibold">{r.itemName}</p>
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">
@@ -174,6 +169,25 @@ const BenchmarkPage = () => {
                         SHA-256 hash (client)
                       </span>
                       <span className="font-mono">{r.hashDurationMs} ms</span>
+                    </div>
+                    <div className="flex justify-between col-span-2 border-t pt-2">
+                      <span className="text-muted-foreground">File size</span>
+                      <span className="font-mono">
+                        {r.fileSizeKb >= 1024
+                          ? `${(r.fileSizeKb / 1024).toFixed(2)} MB`
+                          : `${r.fileSizeKb} KB`}
+                      </span>
+                    </div>
+                    <div className="flex justify-between col-span-2">
+                      <span className="font-semibold text-sky-600">
+                        Security overhead
+                      </span>
+                      <span className="font-mono font-semibold text-sky-600">
+                        {r.signDurationMs +
+                          r.blockchainQueryDurationMs +
+                          r.hashDurationMs}{" "}
+                        ms
+                      </span>
                     </div>
                     <div className="flex justify-between col-span-2 border-t pt-2">
                       <span className="font-semibold">Total</span>
