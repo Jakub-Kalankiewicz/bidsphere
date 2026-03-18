@@ -71,8 +71,8 @@ const BlockchainPage = () => {
 
   return (
     <RoleGate allowedRole={UserRole.ADMIN}>
-      <Card className="w-[900px] mt-[100px]">
-        <CardHeader>
+      <Card className="w-[900px] mt-[100px] mb-8 max-h-[calc(100vh-160px)] flex flex-col">
+        <CardHeader className="shrink-0">
           <p className="text-2xl font-semibold text-center">
             Blockchain Registry
           </p>
@@ -80,7 +80,7 @@ const BlockchainPage = () => {
             On-chain integrity records for all 3D models
           </p>
         </CardHeader>
-        <CardContent>
+        <CardContent className="overflow-y-auto flex-1 min-h-0">
           {loading ? (
             <div className="flex justify-center py-10">
               <ClipLoader color="#36d7b7" size={50} />

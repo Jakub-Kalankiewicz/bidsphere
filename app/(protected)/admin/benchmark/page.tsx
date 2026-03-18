@@ -107,8 +107,8 @@ const BenchmarkPage = () => {
 
   return (
     <RoleGate allowedRole={UserRole.ADMIN}>
-      <Card className="w-[800px] mt-[100px]">
-        <CardHeader>
+      <Card className="w-[800px] mt-[100px] mb-8 max-h-[calc(100vh-160px)] flex flex-col">
+        <CardHeader className="shrink-0">
           <p className="text-2xl font-semibold text-center">
             Performance Benchmark
           </p>
@@ -116,7 +116,7 @@ const BenchmarkPage = () => {
             Measures overhead of each security layer step
           </p>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent className="flex flex-col gap-6 overflow-hidden min-h-0">
           <div className="flex gap-3 items-center">
             <select
               value={selectedId}
@@ -139,7 +139,7 @@ const BenchmarkPage = () => {
           </div>
 
           {results.length > 0 && (
-            <div className="space-y-4">
+            <div className="overflow-y-auto flex-1 min-h-0 space-y-4 pr-1">
               {results.map((r, i) => (
                 <div key={i} className="rounded-lg border p-4 space-y-2">
                   <div className="flex justify-between items-center">
@@ -198,5 +198,6 @@ const BenchmarkPage = () => {
     </RoleGate>
   );
 };
+
 
 export default BenchmarkPage;
