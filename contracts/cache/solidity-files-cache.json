@@ -1,0 +1,40 @@
+{
+  "_format": "hh-sol-cache-2",
+  "files": {
+    "/Users/jakub.kalankiewicz/Code/personal/bidsphere/contracts/contracts/ModelRegistry.sol": {
+      "lastModificationDate": 1773856943318,
+      "contentHash": "94fd96bb2f6c0d743242eb3392b3813a",
+      "sourceName": "contracts/ModelRegistry.sol",
+      "solcConfig": {
+        "version": "0.8.19",
+        "settings": {
+          "optimizer": {
+            "enabled": false,
+            "runs": 200
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.19"
+      ],
+      "artifacts": [
+        "ModelRegistry"
+      ]
+    }
+  }
+}

@@ -7,12 +7,14 @@ import { CameraControls } from "@react-three/drei";
 import { ArcRotateCamera, Vector3 } from "@babylonjs/core";
 import { DefaultCanvas } from "@/components/3D_THREE/canvas";
 import DefaultCanvasBabylon from "@/components/3D_BABYLON/canvas/DefaultCanvas";
+import VerificationBadge from "./VerificationBadge";
 
 interface ModelViewerProps {
   pathToCanvas: string;
+  itemId: string;
 }
 
-const ModelViewer = ({ pathToCanvas }: ModelViewerProps) => {
+const ModelViewer = ({ pathToCanvas, itemId }: ModelViewerProps) => {
   const [lightIntensity, setLightIntensity] = useState(3);
   const [renderThree, setRenderThree] = useState(true);
   const cameraControlsRef = useRef<CameraControls>(null);
@@ -64,6 +66,9 @@ const ModelViewer = ({ pathToCanvas }: ModelViewerProps) => {
           setCamera={setCamera}
         />
       )}
+      <div className="flex justify-center mt-1">
+        <VerificationBadge itemId={itemId} pathToCanvas={pathToCanvas} />
+      </div>
     </>
   );
 };

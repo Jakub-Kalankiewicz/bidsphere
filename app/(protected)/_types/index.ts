@@ -22,6 +22,9 @@ export interface AuctionItem {
   startTime: Date | null;
   endTime: Date | null;
   lastBidId: string | null;
+  modelHash?: string | null;
+  blockchainTxHash?: string | null;
+  originalPathToCanvas?: string | null;
 }
 
 export interface LastBidderType {

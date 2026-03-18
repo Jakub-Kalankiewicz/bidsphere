@@ -2,6 +2,7 @@
 
 import { FaUser } from "react-icons/fa";
 import { MdFileUpload } from "react-icons/md";
+import { MdBarChart, MdVerified } from "react-icons/md";
 import { FaGear } from "react-icons/fa6";
 import { ImExit } from "react-icons/im";
 
@@ -58,6 +59,18 @@ export const UserButton = () => {
                 <DropdownMenuItem>
                   <MdFileUpload className="h-4 w-4 mr-2" />
                   Upload
+                </DropdownMenuItem>
+              </Link>
+              <Link href="/admin/blockchain">
+                <DropdownMenuItem>
+                  <MdVerified className="h-4 w-4 mr-2" />
+                  Blockchain
+                </DropdownMenuItem>
+              </Link>
+              <Link href="/admin/benchmark">
+                <DropdownMenuItem>
+                  <MdBarChart className="h-4 w-4 mr-2" />
+                  Benchmark
                 </DropdownMenuItem>
               </Link>
             </DropdownMenuGroup>

@@ -18,6 +18,12 @@ export const getListOfItems = async () => {
     return { error: "Unauthorized" };
   }
 
+  // Close any auctions that have passed their end time
+  await db.auctionItem.updateMany({
+    where: { status: AuctionStatus.OPEN, endTime: { lt: new Date() } },
+    data: { status: AuctionStatus.CLOSED },
+  });
+
   const items = await db.auctionItem.findMany({
     select: {
       id: true,

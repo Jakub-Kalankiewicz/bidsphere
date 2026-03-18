@@ -5,6 +5,8 @@ import { db } from "@/lib/db";
 import { getUserById } from "@/data/user";
 import { currentUser } from "@/lib/auth";
 import { GetItemSchema } from "@/schemas";
+import { signCanvasUrl } from "@/lib/cloudinary";
+import { AuctionStatus } from "@prisma/client";
 
 export const getItemData = async (values: z.infer<typeof GetItemSchema>) => {
   const user = await currentUser();
@@ -29,6 +31,16 @@ export const getItemData = async (values: z.infer<typeof GetItemSchema>) => {
     return { error: "Invalid ID!" };
   }
 
+  // Close the auction if it has passed its end time
+  await db.auctionItem.updateMany({
+    where: {
+      id: validatedFields.data.id,
+      status: AuctionStatus.OPEN,
+      endTime: { lt: new Date() },
+    },
+    data: { status: AuctionStatus.CLOSED },
+  });
+
   const item = await db.auctionItem.findUnique({
     where: {
       id: validatedFields.data.id,
@@ -52,5 +64,10 @@ export const getItemData = async (values: z.infer<typeof GetItemSchema>) => {
     return { error: "Failed to fetch item" };
   }
 
-  return { success: item };
+  return {
+    success: {
+      ...item,
+      pathToCanvas: item.pathToCanvas ? signCanvasUrl(item.pathToCanvas) : item.pathToCanvas,
+    },
+  };
 };

@@ -4,6 +4,7 @@ import * as z from "zod";
 import { db } from "@/lib/db";
 import { AdminSchema } from "@/schemas";
 import { currentRole, currentUser } from "@/lib/auth";
+import { computeModelHash, registerModelOnChain } from "@/lib/blockchain";
 
 export const adminUpload = async (values: z.infer<typeof AdminSchema>) => {
   const user = await currentUser();
@@ -33,6 +34,18 @@ export const adminUpload = async (values: z.infer<typeof AdminSchema>) => {
 
   if (!newItem || !newItem.name) {
     return { error: "Failed to create item" };
+  }
+
+  // Register model hash on blockchain (non-blocking for item creation)
+  try {
+    const modelHash = await computeModelHash(values.pathToCanvas);
+    const blockchainTxHash = await registerModelOnChain(newItem.id, modelHash);
+    await db.auctionItem.update({
+      where: { id: newItem.id },
+      data: { modelHash, blockchainTxHash },
+    });
+  } catch (error) {
+    console.error("[blockchain] Failed to register model hash:", error);
   }
 
   return { success: "New Item Created!" };

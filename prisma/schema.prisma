@@ -71,10 +71,13 @@ model AuctionItem {
   startTime     DateTime?
   endTime       DateTime?
   status        AuctionStatus @default(NOT_STARTED)
-  bids          Bid[]
-  lastBidId     String?       @db.ObjectId
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  bids                 Bid[]
+  lastBidId            String?       @db.ObjectId
+  modelHash            String?
+  blockchainTxHash     String?
+  originalPathToCanvas String?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
 }
 
 model Bid {

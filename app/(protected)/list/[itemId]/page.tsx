@@ -40,7 +40,7 @@ const ItemPage = () => {
       <div className="basis-3/5 flex justify-center items-center flex-col">
         <div className="h-[70%] w-[80%] z-0">
           {auctionItemData?.pathToCanvas ? (
-            <ModelViewer pathToCanvas={auctionItemData.pathToCanvas} />
+            <ModelViewer pathToCanvas={auctionItemData.pathToCanvas} itemId={itemId} />
           ) : null}
         </div>
       </div>
