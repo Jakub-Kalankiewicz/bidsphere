@@ -7,18 +7,33 @@ cloudinary.config({
 });
 
 /**
- * Extracts the Cloudinary public_id and delivery type from a full secure_url.
- * Handles both type="upload" and type="authenticated" URLs.
+ * Extracts the Cloudinary public_id, delivery type, and version from a full secure_url.
+ * Handles both type="upload" and type="authenticated" URLs, with or without
+ * an existing signature segment (s--...--) in the stored URL.
  */
 export function extractPublicIdAndType(url: string): {
   publicId: string;
   type: "upload" | "authenticated";
+  version?: string;
 } {
-  const authMatch = url.match(/\/authenticated\/(?:v\d+\/)?(.+)$/);
-  if (authMatch) return { publicId: authMatch[1], type: "authenticated" };
+  // Strip query string (e.g. ?_a=analytics_param)
+  const cleanUrl = url.split("?")[0];
 
-  const uploadMatch = url.match(/\/upload\/(?:v\d+\/)?(.+)$/);
-  if (uploadMatch) return { publicId: uploadMatch[1], type: "upload" };
+  // Authenticated: /authenticated/[s--sig--/][v{version}/]{public_id}
+  const authMatch = cleanUrl.match(
+    /\/authenticated\/(?:s--[^/]+--\/)?(?:v(\d+)\/)?(.+)$/
+  );
+  if (authMatch) {
+    return { publicId: authMatch[2], type: "authenticated", version: authMatch[1] };
+  }
+
+  // Upload: /upload/[s--sig--/][v{version}/]{public_id}
+  const uploadMatch = cleanUrl.match(
+    /\/upload\/(?:s--[^/]+--\/)?(?:v(\d+)\/)?(.+)$/
+  );
+  if (uploadMatch) {
+    return { publicId: uploadMatch[2], type: "upload", version: uploadMatch[1] };
+  }
 
   throw new Error(`Cannot extract public_id from Cloudinary URL: ${url}`);
 }
@@ -29,7 +44,7 @@ export function extractPublicIdAndType(url: string): {
  * The URL expires in 1 hour and includes an HMAC signature validated by Cloudinary.
  */
 export function signCanvasUrl(publicUrl: string): string {
-  const { publicId, type } = extractPublicIdAndType(publicUrl);
+  const { publicId, type, version } = extractPublicIdAndType(publicUrl);
 
   return cloudinary.url(publicId, {
     sign_url: true,
@@ -37,5 +52,6 @@ export function signCanvasUrl(publicUrl: string): string {
     type,
     resource_type: "raw",
     expires_at: Math.floor(Date.now() / 1000) + 3600,
+    ...(version ? { version } : {}),
   });
 }
