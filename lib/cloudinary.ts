@@ -7,29 +7,34 @@ cloudinary.config({
 });
 
 /**
- * Extracts the Cloudinary public_id from a full secure_url.
- * Input:  "https://res.cloudinary.com/cloud/raw/upload/v1234567890/bidsphere/canvas/model.glb"
- * Output: "bidsphere/canvas/model.glb"
+ * Extracts the Cloudinary public_id and delivery type from a full secure_url.
+ * Handles both type="upload" and type="authenticated" URLs.
  */
-export function extractPublicId(url: string): string {
-  const match = url.match(/\/upload\/(?:v\d+\/)?(.+)$/);
-  if (!match) {
-    throw new Error(`Cannot extract public_id from Cloudinary URL: ${url}`);
-  }
-  return match[1];
+export function extractPublicIdAndType(url: string): {
+  publicId: string;
+  type: "upload" | "authenticated";
+} {
+  const authMatch = url.match(/\/authenticated\/(?:v\d+\/)?(.+)$/);
+  if (authMatch) return { publicId: authMatch[1], type: "authenticated" };
+
+  const uploadMatch = url.match(/\/upload\/(?:v\d+\/)?(.+)$/);
+  if (uploadMatch) return { publicId: uploadMatch[1], type: "upload" };
+
+  throw new Error(`Cannot extract public_id from Cloudinary URL: ${url}`);
 }
 
 /**
  * Generates a signed, time-limited URL for a raw Cloudinary asset.
+ * Automatically detects whether the asset is type="upload" or type="authenticated".
  * The URL expires in 1 hour and includes an HMAC signature validated by Cloudinary.
  */
 export function signCanvasUrl(publicUrl: string): string {
-  const publicId = extractPublicId(publicUrl);
+  const { publicId, type } = extractPublicIdAndType(publicUrl);
 
   return cloudinary.url(publicId, {
     sign_url: true,
     secure: true,
-    type: "upload",
+    type,
     resource_type: "raw",
     expires_at: Math.floor(Date.now() / 1000) + 3600,
   });
