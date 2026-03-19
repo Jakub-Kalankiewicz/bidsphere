@@ -2,7 +2,7 @@
 
 import { FaUser } from "react-icons/fa";
 import { MdFileUpload } from "react-icons/md";
-import { MdBarChart, MdVerified } from "react-icons/md";
+import { MdBarChart, MdVerified, MdHistory } from "react-icons/md";
 import { FaGear } from "react-icons/fa6";
 import { ImExit } from "react-icons/im";
 
@@ -71,6 +71,12 @@ export const UserButton = () => {
                 <DropdownMenuItem>
                   <MdBarChart className="h-4 w-4 mr-2" />
                   Benchmark
+                </DropdownMenuItem>
+              </Link>
+              <Link href="/admin/access-log">
+                <DropdownMenuItem>
+                  <MdHistory className="h-4 w-4 mr-2" />
+                  Access Log
                 </DropdownMenuItem>
               </Link>
             </DropdownMenuGroup>

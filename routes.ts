@@ -27,6 +27,7 @@ export const protectedRoutes = [
   "/admin/upload",
   "/admin/blockchain",
   "/admin/benchmark",
+  "/admin/access-log",
   "/list/[^/]+",
 ];
 

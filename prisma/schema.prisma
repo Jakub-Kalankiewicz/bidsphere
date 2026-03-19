@@ -80,6 +80,18 @@ model AuctionItem {
   updatedAt            DateTime      @updatedAt
 }
 
+model ModelAccess {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String
+  userEmail  String?
+  itemId     String
+  itemName   String
+  accessedAt DateTime @default(now())
+
+  @@index([itemId])
+  @@index([accessedAt])
+}
+
 model Bid {
   id            String   @id @default(auto()) @map("_id") @db.ObjectId
   auctionItemId String   @db.ObjectId

@@ -63,6 +63,18 @@ export const getItemData = async (values: z.infer<typeof GetItemSchema>) => {
     return { error: "Failed to fetch item" };
   }
 
+  // Log every page visit (fire and forget — not affected by browser model cache)
+  if (item.pathToCanvas) {
+    db.modelAccess.create({
+      data: {
+        userId: user.id,
+        userEmail: user.email ?? null,
+        itemId: item.id,
+        itemName: item.name,
+      },
+    }).catch(console.error);
+  }
+
   return {
     success: {
       ...item,
