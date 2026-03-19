@@ -35,9 +35,9 @@ export async function GET(
   return new NextResponse(upstream.body, {
     headers: {
       "Content-Type": "model/gltf-binary",
-      // Private cache: browser can cache for 1h (matching signed URL expiry)
-      // but intermediate proxies must not cache it
-      "Cache-Control": "private, max-age=3600",
+      // no-store: always fetch fresh from server so tamper detection works correctly
+      // and every access is authenticated. Cloudinary handles CDN caching server-side.
+      "Cache-Control": "no-store",
     },
   });
 }
