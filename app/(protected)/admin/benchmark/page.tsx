@@ -168,10 +168,10 @@ const BenchmarkPage = () => {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground pl-3">
-                        → Proxy overhead
+                        → Server→CDN fetch
                       </span>
                       <span className="font-mono text-amber-500">
-                        ~{Math.max(0, r.fetchDurationMs - r.serverFetchDurationMs)} ms
+                        {r.serverFetchDurationMs} ms
                       </span>
                     </div>
                     <div className="flex justify-between">
