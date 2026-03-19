@@ -3,7 +3,7 @@
 import { getItemData } from "@/actions/getItemData";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { useParams } from "next/navigation";
-import { useEffect, useTransition, useState } from "react";
+import { useEffect, useRef, useTransition, useState } from "react";
 import { ClipLoader } from "react-spinners";
 import { toast } from "sonner";
 import AuctionItemCard from "./_components/AuctionItemCard";
@@ -17,6 +17,7 @@ const ItemPage = () => {
   const itemId = params.itemId;
   const [auctionItemData, setAuctionItemData] = useState<AuctionItem>();
   const [isPending, startTransition] = useTransition();
+  const initialFetchDone = useRef(false);
 
   const fetchData = () => {
     startTransition(() => {
@@ -32,6 +33,8 @@ const ItemPage = () => {
   };
 
   useEffect(() => {
+    if (initialFetchDone.current) return;
+    initialFetchDone.current = true;
     fetchData();
   }, []);
 
