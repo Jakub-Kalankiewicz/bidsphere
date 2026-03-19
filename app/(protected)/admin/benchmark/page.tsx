@@ -39,6 +39,41 @@ const BenchmarkPage = () => {
     });
   }, []);
 
+  const exportCsv = () => {
+    const headers = [
+      "Item Name",
+      "File Size (KB)",
+      "URL Signing (ms)",
+      "Blockchain Query (ms)",
+      "Model Fetch via Proxy (ms)",
+      "Server→CDN Fetch (ms)",
+      "SHA-256 Hash (ms)",
+      "Security Overhead (ms)",
+      "Total (ms)",
+      "Verified",
+    ];
+    const rows = results.map((r) => [
+      r.itemName,
+      r.fileSizeKb,
+      r.signDurationMs,
+      r.blockchainQueryDurationMs,
+      r.fetchDurationMs,
+      r.serverFetchDurationMs,
+      r.hashDurationMs,
+      r.signDurationMs + r.blockchainQueryDurationMs + r.hashDurationMs,
+      r.totalDurationMs,
+      r.verified === null ? "N/A" : r.verified ? "Yes" : "No",
+    ]);
+    const csv = [headers, ...rows].map((row) => row.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `benchmark_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleRun = () => {
     if (!selectedId) return;
     const item = items.find((i) => i.id === selectedId);
@@ -138,6 +173,11 @@ const BenchmarkPage = () => {
                 "Run Benchmark"
               )}
             </Button>
+            {results.length > 0 && (
+              <Button variant="outline" onClick={exportCsv}>
+                Export CSV
+              </Button>
+            )}
           </div>
 
           {results.length > 0 && (
