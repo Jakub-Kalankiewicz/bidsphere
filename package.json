@@ -5,6 +5,7 @@
   "scripts": {
     "cron": "node server/server.js",
     "postinstall": "prisma generate",
+    "blockchain:deploy": "cd contracts && npx hardhat run scripts/deploy.ts --network localhost",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
