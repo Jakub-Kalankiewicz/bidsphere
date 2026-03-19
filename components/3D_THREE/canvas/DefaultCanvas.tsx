@@ -62,6 +62,14 @@ const DefaultCanvas: React.FC<DefaultCanvasProps> = ({
   lightIntensity,
   cameraControlsRef,
 }) => {
+  // Clear useGLTF's internal cache on unmount so the next mount always
+  // fetches fresh (required for tamper simulation to show the correct model)
+  useEffect(() => {
+    return () => {
+      useGLTF.clear(pathToCanvas);
+    };
+  }, [pathToCanvas]);
+
   return (
     <Canvas>
       <Suspense fallback={<CanvasLoader />}>
