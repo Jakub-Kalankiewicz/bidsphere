@@ -5,6 +5,7 @@ import {
   DEFAULT_LOGIN_REDIRECT,
   apiAdminPrefix,
   apiAuthPrefix,
+  apiModelPrefix,
   authRoutes,
   protectedRoutes,
   publicRoutes,
@@ -22,10 +23,11 @@ export default auth((req) => {
 
   const isApiAuthRoute = nextUrl.pathname.startsWith(apiAuthPrefix);
   const isApiAdminRoute = nextUrl.pathname.startsWith(apiAdminPrefix);
+  const isApiModelRoute = nextUrl.pathname.startsWith(apiModelPrefix);
   const isPublicRoute = publicRoutes.includes(nextUrl.pathname);
   const isAuthRoute = authRoutes.includes(nextUrl.pathname);
 
-  if (isApiAuthRoute || isApiAdminRoute) {
+  if (isApiAuthRoute || isApiAdminRoute || isApiModelRoute) {
     return;
   }
 

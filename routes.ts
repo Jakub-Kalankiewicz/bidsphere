@@ -37,6 +37,7 @@ export const protectedRoutes = [
  */
 export const apiAuthPrefix = "/api/auth";
 export const apiAdminPrefix = "/api/admin";
+export const apiModelPrefix = "/api/model";
 
 /*
  * The default redirect path after logging in

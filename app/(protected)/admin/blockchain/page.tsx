@@ -13,6 +13,7 @@ import {
   type RegistryEntry,
 } from "@/actions/getBlockchainRegistry";
 import { simulateTamper, restoreTamper } from "@/actions/simulateTamper";
+import { reregisterModel } from "@/actions/reregisterModel";
 
 function truncateHash(hash: string | null): string {
   if (!hash) return "—";
@@ -49,6 +50,20 @@ const BlockchainPage = () => {
         toast.error(result.error);
       } else {
         toast.success("Tamper simulated — view item page to see mismatch");
+        loadRegistry();
+      }
+      setPendingId(null);
+    });
+  };
+
+  const handleReregister = (id: string) => {
+    setPendingId(id);
+    startTransition(async () => {
+      const result = await reregisterModel(id);
+      if ("error" in result) {
+        toast.error(result.error);
+      } else {
+        toast.success("Re-registered on blockchain");
         loadRegistry();
       }
       setPendingId(null);
@@ -141,6 +156,23 @@ const BlockchainPage = () => {
                           {truncateHash(entry.blockchainTxHash)}
                         </span>
                       </div>
+                    </div>
+                  )}
+
+                  {!entry.onChainHash && entry.modelHash && (
+                    <div className="flex gap-2 pt-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={isPending && pendingId === entry.id}
+                        onClick={() => handleReregister(entry.id)}
+                      >
+                        {isPending && pendingId === entry.id ? (
+                          <BeatLoader size={6} />
+                        ) : (
+                          "Re-register on blockchain"
+                        )}
+                      </Button>
                     </div>
                   )}
 

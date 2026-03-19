@@ -52,7 +52,7 @@ const BenchmarkPage = () => {
         return;
       }
 
-      const { signedUrl, signDurationMs, onChainData, blockchainQueryDurationMs } =
+      const { proxyPath, signDurationMs, onChainData, blockchainQueryDurationMs } =
         serverResult;
 
       // Measure fetch + hash client-side
@@ -64,7 +64,7 @@ const BenchmarkPage = () => {
       let verified: boolean | null = null;
 
       try {
-        const response = await fetch(signedUrl);
+        const response = await fetch(proxyPath);
         const buffer = await response.arrayBuffer();
         fetchDurationMs = Math.round(performance.now() - fetchStart);
         fileSizeKb = Math.round(buffer.byteLength / 1024);

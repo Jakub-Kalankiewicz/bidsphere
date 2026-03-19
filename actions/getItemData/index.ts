@@ -5,7 +5,6 @@ import { db } from "@/lib/db";
 import { getUserById } from "@/data/user";
 import { currentUser } from "@/lib/auth";
 import { GetItemSchema } from "@/schemas";
-import { signCanvasUrl } from "@/lib/cloudinary";
 import { AuctionStatus } from "@prisma/client";
 
 export const getItemData = async (values: z.infer<typeof GetItemSchema>) => {
@@ -67,7 +66,9 @@ export const getItemData = async (values: z.infer<typeof GetItemSchema>) => {
   return {
     success: {
       ...item,
-      pathToCanvas: item.pathToCanvas ? signCanvasUrl(item.pathToCanvas) : item.pathToCanvas,
+      pathToCanvas: item.pathToCanvas
+        ? `/api/model/${item.id}/model.glb`
+        : item.pathToCanvas,
     },
   };
 };
