@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getModelHash } from "@/actions/getModelHash";
 
 type VerificationState =
@@ -32,9 +32,11 @@ const VerificationBadge = ({ itemId, pathToCanvas }: VerificationBadgeProps) => 
   const [clientHash, setClientHash] = useState("");
   const [onChainHash, setOnChainHash] = useState("");
   const [registeredAt, setRegisteredAt] = useState<Date | null>(null);
+  const verifyingRef = useRef(false);
 
   useEffect(() => {
-    if (!pathToCanvas || !itemId) return;
+    if (!pathToCanvas || !itemId || verifyingRef.current) return;
+    verifyingRef.current = true;
 
     const verify = async () => {
       setState("loading");

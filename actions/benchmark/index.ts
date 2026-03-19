@@ -14,6 +14,7 @@ export interface BenchmarkItem {
 export interface BenchmarkServerResult {
   proxyPath: string;
   signDurationMs: number;
+  serverFetchDurationMs: number;
   onChainData: { hash: string; timestamp: number } | null;
   blockchainQueryDurationMs: number;
 }
@@ -49,8 +50,14 @@ export const runServerBenchmark = async (
   if (!item) return { error: "Item not found" };
 
   const signStart = Date.now();
-  signCanvasUrl(item.pathToCanvas); // measure signing overhead (proxy uses this internally)
+  const signedUrl = signCanvasUrl(item.pathToCanvas);
   const signDurationMs = Date.now() - signStart;
+
+  // Measure server→CDN fetch time (full download, same operation the proxy performs)
+  const serverFetchStart = Date.now();
+  const cdnResponse = await fetch(signedUrl);
+  await cdnResponse.arrayBuffer();
+  const serverFetchDurationMs = Date.now() - serverFetchStart;
 
   const blockchainStart = Date.now();
   const onChainData = await getOnChainData(itemId);
@@ -59,6 +66,7 @@ export const runServerBenchmark = async (
   return {
     proxyPath: `/api/model/${itemId}/model.glb`,
     signDurationMs,
+    serverFetchDurationMs,
     onChainData,
     blockchainQueryDurationMs,
   };

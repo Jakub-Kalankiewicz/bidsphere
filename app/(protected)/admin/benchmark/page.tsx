@@ -18,6 +18,7 @@ interface BenchmarkResult {
   fileSizeKb: number;
   signDurationMs: number;
   fetchDurationMs: number;
+  serverFetchDurationMs: number;
   hashDurationMs: number;
   blockchainQueryDurationMs: number;
   totalDurationMs: number;
@@ -52,7 +53,7 @@ const BenchmarkPage = () => {
         return;
       }
 
-      const { proxyPath, signDurationMs, onChainData, blockchainQueryDurationMs } =
+      const { proxyPath, signDurationMs, serverFetchDurationMs, onChainData, blockchainQueryDurationMs } =
         serverResult;
 
       // Measure fetch + hash client-side
@@ -95,6 +96,7 @@ const BenchmarkPage = () => {
           fileSizeKb,
           signDurationMs,
           fetchDurationMs,
+          serverFetchDurationMs,
           hashDurationMs,
           blockchainQueryDurationMs,
           totalDurationMs,
@@ -160,9 +162,17 @@ const BenchmarkPage = () => {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">
-                        Model fetch (network)
+                        Model fetch (via proxy)
                       </span>
                       <span className="font-mono">{r.fetchDurationMs} ms</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground pl-3">
+                        → Proxy overhead
+                      </span>
+                      <span className="font-mono text-amber-500">
+                        ~{Math.max(0, r.fetchDurationMs - r.serverFetchDurationMs)} ms
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">
