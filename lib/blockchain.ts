@@ -68,3 +68,52 @@ export async function getOnChainData(
     return null;
   }
 }
+
+/**
+ * Registers a Merkle root on-chain for a batch of models.
+ * @param root     0x-prefixed 32-byte Merkle root
+ * @param modelIds array of MongoDB AuctionItem IDs in the batch
+ * @returns        the transaction hash
+ */
+export async function registerMerkleRootOnChain(
+  root: string,
+  modelIds: string[]
+): Promise<string> {
+  const contract = getContract(true);
+  const tx = await contract.registerMerkleRoot(root as `0x${string}`, modelIds);
+  const receipt = await tx.wait();
+  return receipt.hash;
+}
+
+/**
+ * Reads the on-chain Merkle root record for a given batchId.
+ * Returns null if not found or blockchain unreachable.
+ */
+export async function getMerkleRootOnChain(
+  batchId: number
+): Promise<{ root: string; timestamp: number; modelIds: string[] } | null> {
+  try {
+    const contract = getContract(false);
+    const [root, timestamp, modelIds]: [string, bigint, string[]] =
+      await contract.getMerkleRoot(batchId);
+    return { root, timestamp: Number(timestamp), modelIds };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Returns the batchId for a given modelId via O(1) on-chain lookup.
+ * Returns 0 if the model has never been batched.
+ */
+export async function getBatchForModelOnChain(
+  modelId: string
+): Promise<number> {
+  try {
+    const contract = getContract(false);
+    const batchId: bigint = await contract.getBatchForModel(modelId);
+    return Number(batchId);
+  } catch {
+    return 0;
+  }
+}
