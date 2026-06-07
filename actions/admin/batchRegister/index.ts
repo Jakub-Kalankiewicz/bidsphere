@@ -46,7 +46,7 @@ export async function batchRegister(
       batchId: newBatchId,
       root: tree.root,
       modelIds: orderedIds,
-      leaves: tree.leaves, // padded, as used by generateProof
+      leaves, // raw unpadded leaves — buildMerkleTree in generateMerkleProof pads them correctly
       txHash,
     },
   });
