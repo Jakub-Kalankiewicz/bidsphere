@@ -56,6 +56,7 @@ export const getItemData = async (values: z.infer<typeof GetItemSchema>) => {
       startTime: true,
       endTime: true,
       lastBidId: true,
+      merkleBatchId: true,
     },
   });
 

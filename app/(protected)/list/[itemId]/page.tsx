@@ -1,6 +1,7 @@
 "use client";
 
 import { getItemData } from "@/actions/getItemData";
+import { generateMerkleProof } from "@/actions/generateMerkleProof";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useTransition, useState } from "react";
@@ -17,7 +18,23 @@ const ItemPage = () => {
   const itemId = params.itemId;
   const [auctionItemData, setAuctionItemData] = useState<AuctionItem>();
   const [isPending, startTransition] = useTransition();
+  const [isDownloadingProof, startProofTransition] = useTransition();
   const initialFetchDone = useRef(false);
+
+  const handleDownloadProof = () => {
+    if (!auctionItemData) return;
+    startProofTransition(async () => {
+      const result = await generateMerkleProof(itemId);
+      if ("error" in result) { toast.error(result.error); return; }
+      const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `proof-${auctionItemData.name.replace(/\s+/g, "-").toLowerCase()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  };
 
   const fetchData = () => {
     startTransition(() => {
@@ -46,6 +63,15 @@ const ItemPage = () => {
             <ModelViewer pathToCanvas={auctionItemData.pathToCanvas} itemId={itemId} />
           ) : null}
         </div>
+        {auctionItemData?.merkleBatchId && (
+          <button
+            onClick={handleDownloadProof}
+            disabled={isDownloadingProof}
+            className="text-xs text-sky-500 underline hover:text-sky-700 mt-2"
+          >
+            {isDownloadingProof ? "Generating proof..." : "Download offline proof bundle"}
+          </button>
+        )}
       </div>
       <div className="basis-2/5 flex justify-center items-center flex-col h-full">
         <Card className="2xl:h-3/5 2xl:w-1/2 h-4/5 w-9/12 shadow-2xl mt-24 2xl:mt-0 shadow-sky-300">

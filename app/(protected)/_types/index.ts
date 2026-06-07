@@ -25,6 +25,7 @@ export interface AuctionItem {
   modelHash?: string | null;
   blockchainTxHash?: string | null;
   originalPathToCanvas?: string | null;
+  merkleBatchId: number | null;
 }
 
 export interface LastBidderType {
