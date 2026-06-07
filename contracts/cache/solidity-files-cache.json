@@ -2,8 +2,8 @@
   "_format": "hh-sol-cache-2",
   "files": {
     "/Users/jakub.kalankiewicz/Code/personal/bidsphere/contracts/contracts/ModelRegistry.sol": {
-      "lastModificationDate": 1773856943318,
-      "contentHash": "94fd96bb2f6c0d743242eb3392b3813a",
+      "lastModificationDate": 1780868891698,
+      "contentHash": "32e29385c291514460f437969772d213",
       "sourceName": "contracts/ModelRegistry.sol",
       "solcConfig": {
         "version": "0.8.19",

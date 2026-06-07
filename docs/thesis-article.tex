@@ -1,0 +1,323 @@
+% ============================================================
+%  Artykuł konferencyjny IEEE — szablon dwukolumnowy
+%  Tytuł: Zdecentralizowane mechanizmy zapewniania integralności
+%         danych modeli 3D z hybrydową walidacją offline
+% ============================================================
+\documentclass[10pt,conference,a4paper]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[polish]{babel}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{url}
+\usepackage{cite}
+\usepackage{graphicx}
+
+% ── Metadane ────────────────────────────────────────────────
+\title{Zdecentralizowane mechanizmy zapewniania integralności
+       danych modeli 3D z hybrydową walidacją offline}
+
+\author{
+  \IEEEauthorblockN{Jakub Kalaniewicz}
+  \IEEEauthorblockA{Wydział Informatyki i Zarządzania\\
+    Politechnika Wrocławska\\
+    Wrocław, Polska\\
+    \texttt{jakub.kalaniewicz@student.pwr.edu.pl}}
+}
+
+% ============================================================
+\begin{document}
+\maketitle
+% ============================================================
+
+% ── Streszczenie ─────────────────────────────────────────────
+\begin{abstract}
+Artykuł opisuje architekturę i wyniki badań platformy aukcyjnej
+BidSphere, której celem jest bezpieczna dystrybucja modeli~3D
+w~formacie GLB. Podstawową luką klasycznego podejścia
+klient-serwer jest to, że protokół SSL/TLS chroni wyłącznie
+transmisję danych, nie gwarantując integralności po stronie
+serwera. Skompromitowany serwer może dostarczyć zmodyfikowany
+plik przez poprawne połączenie HTTPS, a odbiorca nie będzie
+w~stanie tego wykryć. W~odpowiedzi zaprojektowano dwuwarstwowy
+system ochrony łączący uwierzytelniony dostęp przez Cloudinary
+z kryptograficzną weryfikacją opartą na blockchainie Ethereum
+(sieć testowa Sepolia). Kluczowym wkładem jest implementacja
+off-chainowego drzewa Merkle, w~którym na blockchain trafia
+wyłącznie korzeń (Merkle Root), co umożliwia całkowicie
+offline weryfikację pliku przy użyciu samodzielnego pliku
+\texttt{verify.html} bez żadnych wywołań sieciowych.
+Eksperymenty wykazały skrócenie czasu weryfikacji
+z~około~400\,ms (zapytanie RPC) do~około~12\,ms (obliczenia
+lokalne) oraz redukcję kosztów gazu o~ponad~98\% przy
+rejestracji partii modeli w~porównaniu z~rejestracją
+indywidualną.
+\end{abstract}
+
+% ── Słowa kluczowe ───────────────────────────────────────────
+\begin{IEEEkeywords}
+integralność danych, drzewo Merkle, blockchain, weryfikacja
+offline, modele 3D, CVE-2012-2459, smart kontrakt, Solidity
+\end{IEEEkeywords}
+
+% ── 1. Wstęp ─────────────────────────────────────────────────
+\section{Wstęp}
+
+Modele~3D w~formacie GLB zyskują coraz większe znaczenie
+w~branżach, gdzie poprawność geometrii jest krytyczna. W~prze-
+myśle lotniczym i~wojskowym pliki modeli służą bezpośrednio
+do~druku~3D części zamiennych; nawet minimalna zmiana grubości
+ścianki może spowodować awarię~\cite{iso_am}. W~medycynie
+i~protetyce geometria implantu decyduje o~bezpieczeństwie
+pacjenta~\cite{fda_additive}. Na rynku cyfrowych assetów
+premium autentyczność pliku bezpośrednio przekłada się na jego
+wartość handlową.
+
+Klasyczne podejście opiera się na założeniu, że szyfrowanie
+połączenia gwarantuje bezpieczeństwo pliku. Jest to jednak
+nieprawdziwe: protokół TLS~1.3 chroni dane \textit{w~locie}
+(ang.~\textit{data in transit}), lecz nie zapewnia żadnej
+gwarancji integralności po~ich odebraniu ani po~stronie
+serwera~\cite{rfc8446}. Atakujący z~dostępem do~infrastruktury
+może podmienić plik GLB, a~serwer nadal będzie go dostarczał
+przez poprawne połączenie HTTPS. Problem ten określa się jako
+brak ochrony danych \textit{w~spoczynku}
+(ang.~\textit{data at rest}).
+
+Cel niniejszej pracy jest trójdzielny: (1)~wykrywać podmianę
+pliku niezależnie od~stanu serwera, (2)~umożliwiać weryfikację
+bez~aktywnego połączenia sieciowego, (3)~minimalizować koszty
+operacyjne przez zastosowanie kryptograficznych struktur
+off-chain. Praca opisuje platformę BidSphere jako demonstrator
+tych właściwości.
+
+% ── 2. Architektura ──────────────────────────────────────────
+\section{Architektura Platformy BidSphere\\
+         i Wielowarstwowy System Ochrony}
+
+BidSphere zbudowano w~oparciu o~Next.js~15 z~App~Router, bazę
+MongoDB zarządzaną przez ORM~Prisma oraz front-end oparty
+na~TailwindCSS. Komunikacja z~blockchainem odbywa się przez
+bibliotekę ethers.js~v6; smart kontrakty napisano w~Solidity
+0.8.19 i~skompilowano narzędziem Hardhat.
+
+\subsection{Pierwsza warstwa: dostęp i transport}
+
+Uwierzytelnianie użytkowników realizuje NextAuth.js (OAuth~2.0).
+Pliki GLB są przechowywane w~Cloudinary jako zasoby chronione
+(\textit{authenticated delivery}), do~których dostęp wymaga
+podpisanego URL ważnego przez~1~godzinę. Każde żądanie modelu
+przechodzi przez serwerowe proxy (\texttt{/api/model/{[}itemId{]}}),
+które weryfikuje sesję, generuje podpisany URL i~strumieniuje
+odpowiedź z~nagłówkiem \texttt{Cache-Control: no-store},
+uniemożliwiając buforowanie po~stronie klienta. Każdy dostęp
+jest rejestrowany w~kolekcji \texttt{ModelAccess} w~MongoDB,
+tworząc pełną ścieżkę audytu.
+
+\subsection{Druga warstwa: kryptograficzna integralność}
+
+Przy wgrywaniu modelu system oblicza skrót SHA-256 pliku GLB
+i~rejestruje go w~smart kontrakcie \texttt{ModelRegistry}
+na~sieci Ethereum. Komponent \texttt{VerificationBadge} pobiera
+model przez proxy, oblicza skrót po~stronie klienta przy użyciu
+\texttt{crypto.subtle.digest()} i~porównuje z~wartością
+on-chain. Niezgodność jest natychmiast widoczna jako ostrzeżenie
+o~manipulacji. Moduł \texttt{simulateTamper} w~panelu
+administratora pozwala na kontrolowane symulowanie ataku przez
+podmianę ścieżki do~pliku w~bazie danych przy zachowaniu
+oryginalnego skrótu na blockchainie, co umożliwia zebranie
+danych eksperymentalnych.
+
+% ── 3. Drzewo Merkle ─────────────────────────────────────────
+\section{Zdecentralizowana Optymalizacja\\
+         i Walidacja Offline (Drzewo Merkle)}
+
+\subsection{Budowa drzewa i determinizm}
+
+Drzewo Merkle jest binarnym drzewem skrótów, gdzie każdy liść
+odpowiada skrótowi SHA-256 jednego modelu. Aby zapewnić
+determinizm niezależny od~kolejności wstawiania, przy
+wyznaczaniu węzła wewnętrznego zastosowano sortowanie
+leksykograficzne pary dzieci przed konkatenacją:
+\begin{equation}
+  H_p = \mathrm{SHA\text{-}256}\!\left(
+        \min(H_l,H_r)\;\|\;\max(H_l,H_r)\right).
+\end{equation}
+Drzewo jest dopełniane do~najbliższej potęgi liczby~2 przez
+duplikację ostatniego liścia, zgodnie z~podejściem stosowanym
+w~protokole Bitcoin~\cite{nakamoto2008}. Implementacja
+w~TypeScript (plik \texttt{lib/merkle.ts}) zawiera funkcje
+\texttt{buildMerkleTree()}, \texttt{generateProof()}
+oraz \texttt{verifyProof()}.
+
+\subsection{Smart kontrakt ModelRegistry}
+
+Kontrakt przechowuje dwa typy danych: indywidualne hashe modeli
+(poprzedni mechanizm, zachowany dla~kompatybilności) oraz
+korzenie Merkle dla partii. Kluczowe jest mapowanie O(1)
+identyfikujące partię dla~danego modelu:
+\begin{verbatim}
+mapping(string => uint256)
+    private modelToBatchId;
+\end{verbatim}
+Funkcja \texttt{registerMerkleRoot()} rejestruje korzeń
+i~aktualizuje mapowanie dla~wszystkich modeli w~partii
+w~jednej transakcji, emitując zdarzenie
+\texttt{MerkleRootRegistered}. Dzięki temu na~blockchain trafia
+jeden wpis zamiast~$N$, co radykalnie obniża koszty.
+
+\subsection{Trójstopniowa weryfikacja offline}
+
+Plik \texttt{verify.html} jest samodzielnym weryfikatorem
+niewymagającym żadnych zależności zewnętrznych. Weryfikacja
+przebiega w~sześciu krokach. Krok~1 (zabezpieczenie przed
+CVE-2012-2459~\cite{cve2012}): sprawdzenie warunku
+\texttt{leafIndex < totalLeaves}. Bez~tej walidacji
+sfałszowany wpis z~indeksem w~strefie dopełnienia drzewa
+generowałby poprawnie wyglądający dowód Merkle. Krok~2:
+obliczenie skrótu SHA-256 pliku GLB przez
+\texttt{crypto.subtle}. Krok~3: porównanie z~\texttt{fileHash}
+z~pakietu dowodowego. Krok~4: iteracyjna rekonstrukcja korzenia
+przez haszowanie liścia z~kolejnymi węzłami rodzeństwa.
+Krok~5: porównanie ze~skrótem z~pakietu. Krok~6: sprawdzenie
+rekonstruowanego korzenia w~wbudowanej tablicy zaufanych
+korzeni. Tablica ta jest kotwicą zaufania (ang.~\textit{trust
+anchor}), bez~której atakujący mógłby wygenerować spójny
+wewnętrznie, lecz całkowicie sfabrykowany pakiet dowodowy.
+Wyznaczony korzeń jest zawsze wyświetlany w~interfejsie,
+umożliwiając ręczną weryfikację przez~Etherscan lub~aneks
+pracy dyplomowej.
+
+% ── 4. Wyniki ────────────────────────────────────────────────
+\section{Analiza Eksperymentalna i Wyniki}
+
+Eksperymenty przeprowadzono przy użyciu modułu
+\texttt{simulateTamper}/\texttt{restoreTamper} zaimplementowanego
+w~panelu administratora. Tabela~\ref{tab:scenarios} zestawia
+cztery scenariusze zabezpieczenia. Czasy weryfikacji mierzono
+metodą \texttt{performance.now()} po~stronie klienta w~module
+Benchmark; koszty gazu zmierzono narzędziem
+\texttt{hardhat-gas-reporter}.
+
+\begin{table}[htbp]
+\caption{Porównanie scenariuszy weryfikacji integralności modeli 3D}
+\label{tab:scenarios}
+\centering
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{p{1.25cm}p{0.9cm}p{0.95cm}p{1.1cm}p{1.15cm}}
+\toprule
+\textbf{Scenariusz} & \textbf{Sieć} & \textbf{Wykrycie} &
+\textbf{Czas [ms]} & \textbf{Gaz/model} \\
+\midrule
+Brak ochrony   & Nie  & Nigdy & 0          & 0           \\
+Tylko SSL/TLS  & Tak  & Nie   & $\sim$TLS  & 0           \\
+Blockchain RPC & Tak  & Tak   & 300--500   & $\sim$94\,000 \\
+Merkle offline & \textbf{Nie} & \textbf{Tak} &
+                 \textbf{$\sim$12} & \textbf{$<$5\,000} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Czas weryfikacji}
+
+Czas~12\,ms w~scenariuszu~4 obejmuje obliczenie SHA-256 pliku
+GLB oraz pełną rekonstrukcję korzenia Merkle w~przeglądarce.
+W~scenariuszu~3 dominującym składnikiem jest opóźnienie
+sieciowe zapytania RPC do~węzła Ethereum (300--500\,ms),
+niezależne od~rozmiaru pliku. Przyspieszenie jest zatem ponad
+trzydziestokrotne.
+
+\subsection{Analiza kosztów gazu}
+
+Pomiary wykazały, że~\texttt{registerModel} kosztuje
+średnio~93\,997~jednostek gazu. Wywołanie
+\texttt{registerMerkleRoot} dla~dowolnej partii modeli kosztuje
+około~170\,000~gazu niezależnie od~$N$. Przy 100~modelach
+koszt jednostkowy spada do~około~1\,700~gazu/model, co~stanowi
+redukcję o~ponad~98\% w~porównaniu z~rejestracją
+indywidualną. Efekt ten wynika z~amortyzacji stałych kosztów
+transakcji (21\,000~gazu bazowego) i~pojedynczego zapisu
+\texttt{bytes32} na~blockchainie; jedynym kosztem skalowalnym
+liniowo pozostaje aktualizacja mapowania
+\texttt{modelToBatchId}.
+
+% ── 5. Wnioski ───────────────────────────────────────────────
+\section{Wnioski i Perspektywy Dalszych Badań}
+
+W~pracy zaprojektowano i~zaimplementowano hybrydowy system
+weryfikacji integralności modeli~3D, który adresuje lukę
+bezpieczeństwa, której sam protokół SSL/TLS nie jest
+w~stanie wypełnić. Płyną z~tego trzy wnioski: (1)~samo
+szyfrowanie transportu nie wystarczy dla~danych o~krytycznym
+znaczeniu; (2)~kombinacja drzewa Merkle z~blockchainem
+umożliwia weryfikację całkowicie offline przy jednoczesnej
+redukcji kosztów; (3)~mitygacja CVE-2012-2459 przez walidację
+zakresu indeksu liścia jest konieczna dla~bezpieczeństwa
+produkcyjnego.
+
+Pod~względem aplikacyjnym system może znaleźć zastosowanie
+w~bazach wojskowych pracujących w~izolowanych sieciach
+(weryfikacja geometrii przed~drukiem~3D części zamiennych),
+laboratoriach medycznych bez~dostępu do~internetu (walidacja
+implantów) oraz~w~systemach zarządzania cyfrowymi assetami
+przemysłowymi, gdzie podmiana projektu może nieść
+odpowiedzialność prawną.
+
+Głównym kierunkiem dalszych badań jest integracja
+z~protokołem \textit{Zero-Knowledge Proofs}~(ZKP), która
+pozwoliłaby weryfikować przynależność modelu do~zatwierdzonego
+zbioru bez~ujawniania samej geometrii~\cite{boneh2023}.
+Innym interesującym rozwinięciem byłoby automatyczne
+odświeżanie tablicy zaufanych korzeni w~pliku
+\texttt{verify.html} przy~użyciu podpisów cyfrowych
+dostarczanych poza pasmem (ang.~\textit{out-of-band}).
+
+% ── Literatura ───────────────────────────────────────────────
+\begin{thebibliography}{99}
+
+\bibitem{nakamoto2008}
+S.~Nakamoto, ``Bitcoin: A~Peer-to-Peer Electronic Cash
+System,'' \textit{bitcoin.org}, 2008. [Online]. Dostępny:
+\url{https://bitcoin.org/bitcoin.pdf}
+
+\bibitem{rfc8446}
+E.~Rescorla, ``The Transport Layer Security (TLS) Protocol
+Version~1.3,'' RFC~8446, Internet Engineering Task Force,
+sierpień 2018.
+
+\bibitem{cve2012}
+``CVE-2012-2459: Bitcoin Merkle tree duplicate-leaf
+vulnerability,'' National Vulnerability Database, NIST, 2012.
+[Online]. Dostępny:
+\url{https://nvd.nist.gov/vuln/detail/CVE-2012-2459}
+
+\bibitem{wood2014}
+G.~Wood, ``Ethereum: A~Secure Decentralised Generalised
+Transaction Ledger,'' \textit{Ethereum Project Yellow Paper},
+2014. [Online]. Dostępny:
+\url{https://ethereum.github.io/yellowpaper/paper.pdf}
+
+\bibitem{iso_am}
+ISO/ASTM~52900:2021, ``Additive manufacturing --- General
+principles --- Fundamentals and vocabulary,'' International
+Organization for Standardization, 2021.
+
+\bibitem{fda_additive}
+U.S.~Food and Drug Administration, ``Technical Considerations
+for Additive Manufactured Medical Devices,'' FDA Guidance
+Document, 2017.
+
+\bibitem{boneh2023}
+D.~Boneh i~V.~Shoup, ``A~Graduate Course in Applied
+Cryptography,'' wersja~0.6, 2023. [Online]. Dostępny:
+\url{https://toc.cryptobook.us/}
+
+\bibitem{szabo1997}
+N.~Szabo, ``Formalizing and securing relationships on public
+networks,'' \textit{First Monday}, t.~2, nr~9, 1997.
+
+\end{thebibliography}
+
+\end{document}
