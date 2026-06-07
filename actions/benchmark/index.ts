@@ -9,6 +9,7 @@ export interface BenchmarkItem {
   id: string;
   name: string;
   pathToCanvas: string;
+  merkleBatchId: number | null;
 }
 
 export interface BenchmarkServerResult {
@@ -28,7 +29,7 @@ export const getBenchmarkItems = async (): Promise<BenchmarkItem[]> => {
 
   return db.auctionItem.findMany({
     where: { pathToCanvas: { not: "" } },
-    select: { id: true, name: true, pathToCanvas: true },
+    select: { id: true, name: true, pathToCanvas: true, merkleBatchId: true },
     orderBy: { createdAt: "desc" },
   });
 };

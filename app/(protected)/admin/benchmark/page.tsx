@@ -23,6 +23,9 @@ interface BenchmarkResult {
   blockchainQueryDurationMs: number;
   totalDurationMs: number;
   verified: boolean | null;
+  merkleVerifyDurationMs: number | null;
+  proofBundleSizeBytes: number | null;
+  merkleVerified: boolean | null;
 }
 
 
@@ -51,6 +54,7 @@ const BenchmarkPage = () => {
       "Security Overhead (ms)",
       "Total (ms)",
       "Verified",
+      "Merkle Verify (ms)", "Proof Bundle Size (B)", "Merkle Verified",
     ];
     const rows = results.map((r) => [
       r.itemName,
@@ -63,6 +67,9 @@ const BenchmarkPage = () => {
       r.signDurationMs + r.blockchainQueryDurationMs + r.hashDurationMs,
       r.totalDurationMs,
       r.verified === null ? "N/A" : r.verified ? "Yes" : "No",
+      r.merkleVerifyDurationMs ?? "N/A",
+      r.proofBundleSizeBytes ?? "N/A",
+      r.merkleVerified === null ? "N/A" : r.merkleVerified ? "Yes" : "No",
     ]);
     const csv = [headers, ...rows].map((row) => row.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
@@ -123,6 +130,31 @@ const BenchmarkPage = () => {
         return;
       }
 
+      let merkleVerifyDurationMs: number | null = null;
+      let proofBundleSizeBytes: number | null = null;
+      let merkleVerified: boolean | null = null;
+
+      if (item.merkleBatchId) {
+        const { generateMerkleProof } = await import("@/actions/generateMerkleProof");
+        const { verifyProof } = await import("@/lib/merkle");
+        const bundleResult = await generateMerkleProof(item.id);
+
+        if (!("error" in bundleResult)) {
+          const bundleJson = JSON.stringify(bundleResult);
+          proofBundleSizeBytes = new Blob([bundleJson]).size;
+
+          const merkleStart = performance.now();
+          merkleVerified = verifyProof(
+            clientHash,
+            bundleResult.merkleProof,
+            bundleResult.leafIndex,
+            bundleResult.totalLeaves,
+            bundleResult.merkleRoot
+          );
+          merkleVerifyDurationMs = Math.round(performance.now() - merkleStart);
+        }
+      }
+
       const totalDurationMs = Math.round(performance.now() - totalStart);
 
       setResults((prev) => [
@@ -136,6 +168,9 @@ const BenchmarkPage = () => {
           blockchainQueryDurationMs,
           totalDurationMs,
           verified,
+          merkleVerifyDurationMs,
+          proofBundleSizeBytes,
+          merkleVerified,
         },
         ...prev,
       ]);
@@ -220,6 +255,23 @@ const BenchmarkPage = () => {
                       </span>
                       <span className="font-mono">{r.hashDurationMs} ms</span>
                     </div>
+                    {r.merkleVerifyDurationMs !== null && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Merkle proof verify (offline)</span>
+                        <span className="font-mono">{r.merkleVerifyDurationMs} ms</span>
+                      </div>
+                    )}
+                    {r.proofBundleSizeBytes !== null && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Proof bundle size</span>
+                        <span className="font-mono">{r.proofBundleSizeBytes} B</span>
+                      </div>
+                    )}
+                    {r.merkleVerified !== null && (
+                      <p className={`text-xs font-semibold col-span-2 ${r.merkleVerified ? "text-emerald-500" : "text-red-500"}`}>
+                        {r.merkleVerified ? "✓ Merkle proof verified (offline)" : "⚠ Merkle proof invalid"}
+                      </p>
+                    )}
                     <div className="flex justify-between col-span-2 border-t pt-2">
                       <span className="text-muted-foreground">File size</span>
                       <span className="font-mono">
