@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BidSphere — Offline Model Verifier</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 40px 16px; }
+    h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 4px; }
+    .subtitle { color: #64748b; font-size: 0.875rem; margin-bottom: 32px; }
+    .drop-row { display: flex; gap: 16px; width: 100%; max-width: 700px; margin-bottom: 24px; flex-wrap: wrap; }
+    .drop-zone { flex: 1; min-width: 200px; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 28px 16px; text-align: center; cursor: pointer; transition: border-color 0.2s, background 0.2s; background: white; }
+    .drop-zone.has-file { border-color: #38bdf8; background: #f0f9ff; }
+    .drop-zone.drag-over { border-color: #0ea5e9; background: #e0f2fe; }
+    .drop-zone input { display: none; }
+    .drop-label { font-size: 0.8rem; color: #64748b; margin-top: 6px; }
+    .drop-filename { font-size: 0.75rem; color: #0ea5e9; margin-top: 4px; font-weight: 600; word-break: break-all; }
+    button#verifyBtn { padding: 12px 32px; background: #0ea5e9; color: white; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    button#verifyBtn:disabled { background: #94a3b8; cursor: not-allowed; }
+    button#verifyBtn:hover:not(:disabled) { background: #0284c7; }
+    #result { width: 100%; max-width: 700px; margin-top: 24px; }
+    .result-box { border-radius: 12px; padding: 20px; font-size: 0.875rem; }
+    .result-green { background: #f0fdf4; border: 1px solid #86efac; }
+    .result-red { background: #fef2f2; border: 1px solid #fca5a5; }
+    .result-orange { background: #fff7ed; border: 1px solid #fdba74; }
+    .result-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 12px; }
+    .hash-row { margin: 6px 0; }
+    .hash-label { color: #64748b; font-size: 0.75rem; margin-bottom: 2px; }
+    .hash-val { font-family: monospace; font-size: 0.7rem; word-break: break-all; padding: 6px 8px; border-radius: 6px; background: #f1f5f9; }
+    .meta { color: #64748b; font-size: 0.75rem; margin-top: 10px; }
+    footer { margin-top: 48px; color: #94a3b8; font-size: 0.75rem; text-align: center; }
+    footer a { color: #38bdf8; }
+  </style>
+</head>
+<body>
+  <h1>BidSphere Offline Verifier</h1>
+  <p class="subtitle">Verify a 3D model's authenticity without any network connection.</p>
+
+  <div class="drop-row">
+    <div class="drop-zone" id="glbZone">
+      <input type="file" id="glbInput" accept=".glb" />
+      <div>📦 Drop <strong>.glb</strong> file here</div>
+      <div class="drop-label">or click to browse</div>
+      <div class="drop-filename" id="glbName"></div>
+    </div>
+    <div class="drop-zone" id="proofZone">
+      <input type="file" id="proofInput" accept=".json" />
+      <div>📄 Drop <strong>proof.json</strong> here</div>
+      <div class="drop-label">or click to browse</div>
+      <div class="drop-filename" id="proofName"></div>
+    </div>
+  </div>
+
+  <button id="verifyBtn" disabled>Verify</button>
+  <div id="result"></div>
+
+  <footer>
+    <p>This verifier works entirely in your browser — no data is sent anywhere.</p>
+    <p style="margin-top:6px">To independently confirm Merkle roots on-chain, visit
+      <a id="etherscanLink" href="#" target="_blank">Etherscan (Sepolia)</a>.
+    </p>
+  </footer>
+
+  <script>
+    // ─── TRUSTED ROOTS TABLE ─────────────────────────────────────────────────
+    // Update this object after each batchRegister call.
+    // Format: { batchId: "0x<merkle-root>" }
+    const TRUSTED_ROOTS = {
+      // 1: "0x<root-from-first-batch>",
+    };
+    const CONTRACT_ADDRESS = ""; // fill in after Sepolia deployment
+    // ─────────────────────────────────────────────────────────────────────────
+
+    document.getElementById("etherscanLink").href =
+      `https://sepolia.etherscan.io/address/${CONTRACT_ADDRESS}`;
+
+    let glbFile = null;
+    let proofData = null;
+
+    function setupDropZone(zoneId, inputId, nameId, accept, onLoad) {
+      const zone = document.getElementById(zoneId);
+      const input = document.getElementById(inputId);
+      const nameEl = document.getElementById(nameId);
+
+      zone.addEventListener("click", () => input.click());
+      zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("drag-over"); });
+      zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
+      zone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        zone.classList.remove("drag-over");
+        const file = e.dataTransfer.files[0];
+        if (file) handleFile(file);
+      });
+      input.addEventListener("change", () => { if (input.files[0]) handleFile(input.files[0]); });
+
+      function handleFile(file) {
+        nameEl.textContent = file.name;
+        zone.classList.add("has-file");
+        onLoad(file);
+      }
+    }
+
+    setupDropZone("glbZone", "glbInput", "glbName", ".glb", (file) => {
+      glbFile = file;
+      updateBtn();
+    });
+
+    setupDropZone("proofZone", "proofInput", "proofName", ".json", (file) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try { proofData = JSON.parse(e.target.result); } catch { proofData = null; }
+        updateBtn();
+      };
+      reader.readAsText(file);
+    });
+
+    function updateBtn() {
+      document.getElementById("verifyBtn").disabled = !(glbFile && proofData);
+    }
+
+    // ─── Merkle helpers (mirrored from lib/merkle.ts) ─────────────────────
+    async function sha256hex(data) {
+      const buf = await crypto.subtle.digest("SHA-256", data);
+      return "0x" + [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    function hexToBytes(hex) {
+      const h = hex.startsWith("0x") ? hex.slice(2) : hex;
+      const arr = new Uint8Array(h.length / 2);
+      for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.slice(i*2, i*2+2), 16);
+      return arr;
+    }
+
+    async function sha256pair(a, b) {
+      const [left, right] = a <= b ? [a, b] : [b, a];
+      const combined = new Uint8Array([...hexToBytes(left), ...hexToBytes(right)]);
+      return sha256hex(combined);
+    }
+
+    async function computeRoot(leaf, proof, leafIndex) {
+      let current = leaf;
+      let index = leafIndex;
+      for (const sibling of proof) {
+        current = await sha256pair(current, sibling);
+        index = Math.floor(index / 2);
+      }
+      return current;
+    }
+    // ──────────────────────────────────────────────────────────────────────
+
+    document.getElementById("verifyBtn").addEventListener("click", async () => {
+      const btn = document.getElementById("verifyBtn");
+      btn.disabled = true;
+      btn.textContent = "Verifying...";
+      document.getElementById("result").innerHTML = "";
+
+      try {
+        // Gate 1: CVE-2012-2459 duplicate-leaf attack guard.
+        // Reject bundles where leafIndex >= totalLeaves (pad-zone ghost entries).
+        if (proofData.leafIndex >= proofData.totalLeaves) {
+          throw new Error(
+            `leafIndex ${proofData.leafIndex} is >= totalLeaves ${proofData.totalLeaves} — possible duplicate-leaf attack (CVE-2012-2459)`
+          );
+        }
+
+        // Gate 2: hash the GLB
+        const glbBuffer = await glbFile.arrayBuffer();
+        const computedHash = await sha256hex(glbBuffer);
+
+        // Gate 3: check file hash matches bundle
+        const fileHashMatch = computedHash.toLowerCase() === proofData.fileHash.toLowerCase();
+
+        // Gate 4: walk Merkle proof to derive root
+        const derivedRoot = await computeRoot(computedHash, proofData.merkleProof, proofData.leafIndex);
+        const proofConsistent = derivedRoot.toLowerCase() === proofData.merkleRoot.toLowerCase();
+
+        // Gate 5: check derived root against trusted table
+        const trustedRoot = TRUSTED_ROOTS[proofData.batchId];
+        const rootTrusted = trustedRoot
+          ? trustedRoot.toLowerCase() === derivedRoot.toLowerCase()
+          : null; // null = not in table yet
+
+        showResult({ computedHash, proofData, fileHashMatch, proofConsistent, derivedRoot, rootTrusted });
+      } catch (err) {
+        document.getElementById("result").innerHTML =
+          `<div class="result-box result-red"><div class="result-title" style="color:#dc2626">Error during verification</div><p>${err.message}</p></div>`;
+      }
+
+      btn.disabled = false;
+      btn.textContent = "Verify";
+    });
+
+    function showResult({ computedHash, proofData, fileHashMatch, proofConsistent, derivedRoot, rootTrusted }) {
+      const tampered = !fileHashMatch || !proofConsistent;
+      const unknownRoot = !tampered && rootTrusted === null;
+
+      let cls = tampered ? "result-red" : unknownRoot ? "result-orange" : "result-green";
+      let title = tampered
+        ? "⚠ Integrity Mismatch — File May Be Tampered"
+        : unknownRoot
+          ? "⚠ Proof Valid — Root Not in Trusted Table"
+          : "✓ Fully Verified — File Is Authentic";
+      let titleColor = tampered ? "#dc2626" : unknownRoot ? "#ea580c" : "#16a34a";
+
+      let html = `<div class="result-box ${cls}">
+        <div class="result-title" style="color:${titleColor}">${title}</div>`;
+
+      if (unknownRoot) {
+        html += `<p style="margin:8px 0;color:#92400e;font-size:0.8rem">
+          The Merkle proof is internally valid but batch #${proofData.batchId} is not yet in this verifier's trusted roots table.
+          Manually compare the derived root below against the contract on
+          <a href="https://sepolia.etherscan.io/address/${CONTRACT_ADDRESS}" target="_blank" style="color:#0ea5e9">Etherscan</a>
+          or the published root in the thesis appendix.
+        </p>`;
+      }
+
+      html += `
+        <div class="hash-row"><div class="hash-label">Computed SHA-256 (this file):</div>
+          <div class="hash-val" style="color:${fileHashMatch ? "#16a34a" : "#dc2626"}">${computedHash}</div></div>
+        <div class="hash-row"><div class="hash-label">Bundle file hash:</div>
+          <div class="hash-val">${proofData.fileHash}</div></div>
+        <div class="hash-row"><div class="hash-label">Derived Merkle root (from proof path):</div>
+          <div class="hash-val" style="color:${proofConsistent ? "#16a34a" : "#dc2626"}">${derivedRoot}</div></div>
+        <div class="hash-row"><div class="hash-label">Bundle Merkle root:</div>
+          <div class="hash-val">${proofData.merkleRoot}</div></div>
+        <div class="meta">
+          Model: <strong>${proofData.modelName}</strong> &nbsp;|&nbsp;
+          Batch #${proofData.batchId} &nbsp;|&nbsp;
+          Leaf index: ${proofData.leafIndex} &nbsp;|&nbsp;
+          Registered: ${new Date(proofData.registeredAt * 1000).toLocaleString()}
+        </div>
+      </div>`;
+
+      document.getElementById("result").innerHTML = html;
+    }
+  </script>
+</body>
+</html>
