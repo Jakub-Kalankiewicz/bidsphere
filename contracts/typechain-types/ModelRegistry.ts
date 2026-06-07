@@ -24,11 +24,33 @@ import type {
 
 export interface ModelRegistryInterface extends Interface {
   getFunction(
-    nameOrSignature: "getModel" | "isRegistered" | "owner" | "registerModel"
+    nameOrSignature:
+      | "batchCount"
+      | "getBatchForModel"
+      | "getMerkleRoot"
+      | "getModel"
+      | "isRegistered"
+      | "owner"
+      | "registerMerkleRoot"
+      | "registerModel"
   ): FunctionFragment;
 
-  getEvent(nameOrSignatureOrTopic: "ModelRegistered"): EventFragment;
+  getEvent(
+    nameOrSignatureOrTopic: "MerkleRootRegistered" | "ModelRegistered"
+  ): EventFragment;
 
+  encodeFunctionData(
+    functionFragment: "batchCount",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "getBatchForModel",
+    values: [string]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "getMerkleRoot",
+    values: [BigNumberish]
+  ): string;
   encodeFunctionData(functionFragment: "getModel", values: [string]): string;
   encodeFunctionData(
     functionFragment: "isRegistered",
@@ -36,10 +58,23 @@ export interface ModelRegistryInterface extends Interface {
   ): string;
   encodeFunctionData(functionFragment: "owner", values?: undefined): string;
   encodeFunctionData(
+    functionFragment: "registerMerkleRoot",
+    values: [BytesLike, string[]]
+  ): string;
+  encodeFunctionData(
     functionFragment: "registerModel",
     values: [string, BytesLike]
   ): string;
 
+  decodeFunctionResult(functionFragment: "batchCount", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "getBatchForModel",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "getMerkleRoot",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(functionFragment: "getModel", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "isRegistered",
@@ -47,9 +82,31 @@ export interface ModelRegistryInterface extends Interface {
   ): Result;
   decodeFunctionResult(functionFragment: "owner", data: BytesLike): Result;
   decodeFunctionResult(
+    functionFragment: "registerMerkleRoot",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "registerModel",
     data: BytesLike
   ): Result;
+}
+
+export namespace MerkleRootRegisteredEvent {
+  export type InputTuple = [
+    batchId: BigNumberish,
+    root: BytesLike,
+    timestamp: BigNumberish
+  ];
+  export type OutputTuple = [batchId: bigint, root: string, timestamp: bigint];
+  export interface OutputObject {
+    batchId: bigint;
+    root: string;
+    timestamp: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
 }
 
 export namespace ModelRegisteredEvent {
@@ -113,6 +170,22 @@ export interface ModelRegistry extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
+  batchCount: TypedContractMethod<[], [bigint], "view">;
+
+  getBatchForModel: TypedContractMethod<[modelId: string], [bigint], "view">;
+
+  getMerkleRoot: TypedContractMethod<
+    [batchId: BigNumberish],
+    [
+      [string, bigint, string[]] & {
+        root: string;
+        timestamp: bigint;
+        modelIds: string[];
+      }
+    ],
+    "view"
+  >;
+
   getModel: TypedContractMethod<
     [modelId: string],
     [[string, bigint] & { hash: string; timestamp: bigint }],
@@ -122,6 +195,12 @@ export interface ModelRegistry extends BaseContract {
   isRegistered: TypedContractMethod<[modelId: string], [boolean], "view">;
 
   owner: TypedContractMethod<[], [string], "view">;
+
+  registerMerkleRoot: TypedContractMethod<
+    [root: BytesLike, modelIds: string[]],
+    [void],
+    "nonpayable"
+  >;
 
   registerModel: TypedContractMethod<
     [modelId: string, hash: BytesLike],
@@ -133,6 +212,25 @@ export interface ModelRegistry extends BaseContract {
     key: string | FunctionFragment
   ): T;
 
+  getFunction(
+    nameOrSignature: "batchCount"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "getBatchForModel"
+  ): TypedContractMethod<[modelId: string], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "getMerkleRoot"
+  ): TypedContractMethod<
+    [batchId: BigNumberish],
+    [
+      [string, bigint, string[]] & {
+        root: string;
+        timestamp: bigint;
+        modelIds: string[];
+      }
+    ],
+    "view"
+  >;
   getFunction(
     nameOrSignature: "getModel"
   ): TypedContractMethod<
@@ -147,6 +245,13 @@ export interface ModelRegistry extends BaseContract {
     nameOrSignature: "owner"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
+    nameOrSignature: "registerMerkleRoot"
+  ): TypedContractMethod<
+    [root: BytesLike, modelIds: string[]],
+    [void],
+    "nonpayable"
+  >;
+  getFunction(
     nameOrSignature: "registerModel"
   ): TypedContractMethod<
     [modelId: string, hash: BytesLike],
@@ -154,6 +259,13 @@ export interface ModelRegistry extends BaseContract {
     "nonpayable"
   >;
 
+  getEvent(
+    key: "MerkleRootRegistered"
+  ): TypedContractEvent<
+    MerkleRootRegisteredEvent.InputTuple,
+    MerkleRootRegisteredEvent.OutputTuple,
+    MerkleRootRegisteredEvent.OutputObject
+  >;
   getEvent(
     key: "ModelRegistered"
   ): TypedContractEvent<
@@ -163,6 +275,17 @@ export interface ModelRegistry extends BaseContract {
   >;
 
   filters: {
+    "MerkleRootRegistered(uint256,bytes32,uint256)": TypedContractEvent<
+      MerkleRootRegisteredEvent.InputTuple,
+      MerkleRootRegisteredEvent.OutputTuple,
+      MerkleRootRegisteredEvent.OutputObject
+    >;
+    MerkleRootRegistered: TypedContractEvent<
+      MerkleRootRegisteredEvent.InputTuple,
+      MerkleRootRegisteredEvent.OutputTuple,
+      MerkleRootRegisteredEvent.OutputObject
+    >;
+
     "ModelRegistered(string,bytes32,uint256)": TypedContractEvent<
       ModelRegisteredEvent.InputTuple,
       ModelRegisteredEvent.OutputTuple,

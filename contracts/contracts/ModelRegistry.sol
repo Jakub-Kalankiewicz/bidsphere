@@ -1,27 +1,29 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-/**
- * @title ModelRegistry
- * @notice Stores SHA-256 hashes of 3D auction models for integrity verification.
- * Each model is identified by its MongoDB AuctionItem ID.
- */
 contract ModelRegistry {
     address public owner;
 
+    // --- Individual registration (unchanged) ---
     struct ModelRecord {
         bytes32 hash;
         uint256 timestamp;
         bool registered;
     }
-
     mapping(string => ModelRecord) private models;
 
-    event ModelRegistered(
-        string indexed modelId,
-        bytes32 hash,
-        uint256 timestamp
-    );
+    // --- Merkle batch registration ---
+    struct MerkleRecord {
+        bytes32 root;
+        uint256 timestamp;
+        string[] modelIds;
+    }
+    mapping(uint256 => MerkleRecord) private merkleBatches;
+    mapping(string => uint256) private modelToBatchId;
+    uint256 public batchCount;
+
+    event ModelRegistered(string indexed modelId, bytes32 hash, uint256 timestamp);
+    event MerkleRootRegistered(uint256 indexed batchId, bytes32 root, uint256 timestamp);
 
     constructor() {
         owner = msg.sender;
@@ -32,39 +34,38 @@ contract ModelRegistry {
         _;
     }
 
-    /**
-     * @notice Register a model hash on-chain. Only callable by the contract owner.
-     * @param modelId  The MongoDB AuctionItem ID (24-char hex string)
-     * @param hash     SHA-256 hash of the GLB file as bytes32
-     */
-    function registerModel(
-        string calldata modelId,
-        bytes32 hash
-    ) external onlyOwner {
-        models[modelId] = ModelRecord({
-            hash: hash,
-            timestamp: block.timestamp,
-            registered: true
-        });
+    // --- Individual registration (unchanged) ---
+    function registerModel(string calldata modelId, bytes32 hash) external onlyOwner {
+        models[modelId] = ModelRecord({ hash: hash, timestamp: block.timestamp, registered: true });
         emit ModelRegistered(modelId, hash, block.timestamp);
     }
 
-    /**
-     * @notice Retrieve the registered hash and timestamp for a model.
-     * @param modelId  The MongoDB AuctionItem ID
-     */
-    function getModel(
-        string calldata modelId
-    ) external view returns (bytes32 hash, uint256 timestamp) {
+    function getModel(string calldata modelId) external view returns (bytes32 hash, uint256 timestamp) {
         require(models[modelId].registered, "Model not registered");
         return (models[modelId].hash, models[modelId].timestamp);
     }
 
-    /**
-     * @notice Check whether a model has been registered.
-     * @param modelId  The MongoDB AuctionItem ID
-     */
     function isRegistered(string calldata modelId) external view returns (bool) {
         return models[modelId].registered;
+    }
+
+    // --- Merkle batch registration ---
+    function registerMerkleRoot(bytes32 root, string[] calldata modelIds) external onlyOwner {
+        uint256 batchId = ++batchCount;
+        merkleBatches[batchId] = MerkleRecord({ root: root, timestamp: block.timestamp, modelIds: modelIds });
+        for (uint256 i = 0; i < modelIds.length; i++) {
+            modelToBatchId[modelIds[i]] = batchId;
+        }
+        emit MerkleRootRegistered(batchId, root, block.timestamp);
+    }
+
+    function getMerkleRoot(uint256 batchId) external view returns (bytes32 root, uint256 timestamp, string[] memory modelIds) {
+        require(batchId > 0 && batchId <= batchCount, "Batch not found");
+        MerkleRecord storage rec = merkleBatches[batchId];
+        return (rec.root, rec.timestamp, rec.modelIds);
+    }
+
+    function getBatchForModel(string calldata modelId) external view returns (uint256 batchId) {
+        return modelToBatchId[modelId];
     }
 }
