@@ -12,6 +12,7 @@ export interface RegistryEntry {
   isTampered: boolean;
   onChainHash: string | null;
   registeredAt: Date | null;
+  merkleBatchId: number | null;
 }
 
 export const getBlockchainRegistry = async (): Promise<
@@ -29,6 +30,7 @@ export const getBlockchainRegistry = async (): Promise<
       modelHash: true,
       blockchainTxHash: true,
       originalPathToCanvas: true,
+      merkleBatchId: true,
     },
     orderBy: { createdAt: "desc" },
   });
@@ -44,6 +46,7 @@ export const getBlockchainRegistry = async (): Promise<
         isTampered: item.originalPathToCanvas !== null,
         onChainHash: onChain?.hash ?? null,
         registeredAt: onChain ? new Date(onChain.timestamp * 1000) : null,
+        merkleBatchId: item.merkleBatchId,
       };
     })
   );
