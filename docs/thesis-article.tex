@@ -155,8 +155,8 @@ oraz \texttt{verifyProof()}.
 \subsection{Smart kontrakt ModelRegistry}
 
 Kontrakt przechowuje dwa typy danych: indywidualne hashe modeli
-(poprzedni mechanizm, zachowany dla~kompatybilności) oraz
-korzenie Merkle dla partii. Kluczowe jest mapowanie O(1)
+rejestrowane w~momencie wgrywania pliku oraz korzenie Merkle
+reprezentujące całe partie modeli. Kluczowe jest mapowanie O(1)
 identyfikujące partię dla~danego modelu:
 \begin{verbatim}
 mapping(string => uint256)
