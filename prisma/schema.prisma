@@ -76,6 +76,7 @@ model AuctionItem {
   modelHash            String?
   blockchainTxHash     String?
   originalPathToCanvas String?
+  merkleBatchId        Int?
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
 }
@@ -104,4 +105,14 @@ model Bid {
 
   @@index([auctionItemId, userId])
   @@index([createdAt])
+}
+
+model MerkleBatch {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  batchId   Int      @unique
+  root      String
+  modelIds  String[]
+  leaves    String[]
+  txHash    String?
+  createdAt DateTime @default(now())
 }
