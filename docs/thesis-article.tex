@@ -213,21 +213,26 @@ Benchmark; koszty gazu zmierzono narzędziem
 \midrule
 Brak ochrony   & Nie  & Nigdy & 0          & 0           \\
 Tylko SSL/TLS  & Tak  & Nie   & —          & 0           \\
-Blockchain RPC & Tak  & Tak   & 300--500   & $\sim$94\,000 \\
+Blockchain RPC & Tak  & Tak   & 30 / 300--500$^*$   & $\sim$94\,000 \\
 Merkle offline & \textbf{Nie} & \textbf{Tak} &
-                 \textbf{$\sim$12} & \textbf{1\,700--17\,000} \\
+                 \textbf{$\sim$5} & \textbf{1\,700--17\,000} \\
 \bottomrule
 \end{tabular}
+{\footnotesize $^*$30\,ms — lokalny węzeł Hardhat;
+300--500\,ms — publiczny RPC (Alchemy/Sepolia).}
 \end{table}
 
 \subsection{Czas weryfikacji}
 
-Czas~12\,ms w~scenariuszu~4 obejmuje obliczenie SHA-256 pliku
-GLB oraz pełną rekonstrukcję korzenia Merkle w~przeglądarce.
-W~scenariuszu~3 dominującym składnikiem jest opóźnienie
-sieciowe zapytania RPC do~węzła Ethereum (300--500\,ms),
-niezależne od~rozmiaru pliku. Przyspieszenie jest zatem ponad
-trzydziestokrotne.
+Czas~około~5\,ms w~scenariuszu~4 obejmuje obliczenie SHA-256
+pliku GLB (zmierzono~4\,ms dla~pliku~5,92\,MB przy użyciu
+\texttt{crypto.subtle}) oraz przejście ścieżki Merkle
+(3--5~operacji SHA-256 na~32~bajtach, poniżej~1\,ms).
+W~scenariuszu~3 na~lokalnym węźle Hardhat uzyskano~30\,ms,
+jednak w~środowisku produkcyjnym z~publicznym węzłem RPC
+(Alchemy/Sepolia) opóźnienie wynosi~300--500\,ms ze~względu
+na~latencję sieci. Przyspieszenie względem środowiska
+docelowego wynosi zatem ponad~60$\times$.
 
 \subsection{Analiza kosztów gazu}
 
