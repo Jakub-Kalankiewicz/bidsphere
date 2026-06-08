@@ -215,7 +215,7 @@ Brak ochrony   & Nie  & Nigdy & 0          & 0           \\
 Tylko SSL/TLS  & Tak  & Nie   & $\sim$TLS  & 0           \\
 Blockchain RPC & Tak  & Tak   & 300--500   & $\sim$94\,000 \\
 Merkle offline & \textbf{Nie} & \textbf{Tak} &
-                 \textbf{$\sim$12} & \textbf{$<$5\,000} \\
+                 \textbf{$\sim$12} & \textbf{1\,700--17\,000} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -231,17 +231,18 @@ trzydziestokrotne.
 
 \subsection{Analiza kosztów gazu}
 
-Pomiary wykazały, że~\texttt{registerModel} kosztuje
-średnio~93\,997~jednostek gazu. Wywołanie
-\texttt{registerMerkleRoot} dla~dowolnej partii modeli kosztuje
-około~170\,000~gazu niezależnie od~$N$. Przy 100~modelach
-koszt jednostkowy spada do~około~1\,700~gazu/model, co~stanowi
-redukcję o~ponad~98\% w~porównaniu z~rejestracją
-indywidualną. Efekt ten wynika z~amortyzacji stałych kosztów
-transakcji (21\,000~gazu bazowego) i~pojedynczego zapisu
-\texttt{bytes32} na~blockchainie; jedynym kosztem skalowalnym
-liniowo pozostaje aktualizacja mapowania
-\texttt{modelToBatchId}.
+Pomiary narzędziem \texttt{hardhat-gas-reporter} wykazały,
+że~\texttt{registerModel} kosztuje stale~93\,997~jednostek
+gazu. Koszt wywołania \texttt{registerMerkleRoot} wynosi
+od~128\,955 do~210\,006~gazu (średnio~170\,218) i~rośnie
+liniowo z~liczebnością partii ze~względu na~aktualizację
+mapowania \texttt{modelToBatchId} dla~każdego modelu.
+Koszt jednostkowy na~model wynosi zatem~170\,218\,/\,$N$.
+Przy partii 10~modeli daje to~17\,022~gazu/model (redukcja
+o~82\%), a~przy~100~modelach~1\,702~gazu/model (redukcja
+o~ponad~98\%). Stały koszt rejestracji korzenia
+(\texttt{bytes32} SSTORE~$\approx$\,20\,000~gazu) jest
+w~pełni amortyzowany już dla~kilku modeli.
 
 % ── 5. Wnioski ───────────────────────────────────────────────
 \section{Wnioski i Perspektywy Dalszych Badań}
