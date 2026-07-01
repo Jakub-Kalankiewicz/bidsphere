@@ -67,13 +67,13 @@
     // Update this object after each batchRegister call.
     // Format: { batchId: "0x<merkle-root>" }
     const TRUSTED_ROOTS = {
-      // 1: "0x<root-from-first-batch>",
+      1: "0x14c2340975e215267ff85896eb264043517479cabc3734437b3687133657ff4d",
     };
     const CONTRACT_ADDRESS = ""; // fill in after Sepolia deployment
     // ─────────────────────────────────────────────────────────────────────────
 
     document.getElementById("etherscanLink").href =
-      `https://sepolia.etherscan.io/address/${CONTRACT_ADDRESS}`;
+      `https://sepolia.etherscan.io/`;
 
     let glbFile = null;
     let proofData = null;

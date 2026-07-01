@@ -67,7 +67,10 @@ export async function getPendingBatchItems() {
   if (role !== "ADMIN") return [];
 
   return db.auctionItem.findMany({
-    where: { modelHash: { not: null }, merkleBatchId: null },
+    where: {
+      modelHash: { not: null },
+      OR: [{ merkleBatchId: null }, { merkleBatchId: { isSet: false } }],
+    },
     select: { id: true, name: true, modelHash: true },
     orderBy: { createdAt: "asc" },
   });
