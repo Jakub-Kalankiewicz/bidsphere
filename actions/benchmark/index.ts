@@ -3,21 +3,25 @@
 import { db } from "@/lib/db";
 import { currentRole, currentUser } from "@/lib/auth";
 import { signCanvasUrl } from "@/lib/cloudinary";
-import { getOnChainData } from "@/lib/blockchain";
+import { getOnChainDataDetailed } from "@/lib/blockchain";
 
 export interface BenchmarkItem {
   id: string;
   name: string;
-  pathToCanvas: string;
   merkleBatchId: number | null;
 }
 
 export interface BenchmarkServerResult {
   proxyPath: string;
+  onChainData: { hash: string; timestamp: number } | null;
+  blockchainStatus: "registered" | "unregistered" | "unavailable";
+  blockchainError: string;
+  blockchainQueryDurationMs: number;
+}
+
+export interface BenchmarkServerDiagnosticResult {
   signDurationMs: number;
   serverFetchDurationMs: number;
-  onChainData: { hash: string; timestamp: number } | null;
-  blockchainQueryDurationMs: number;
 }
 
 /** Returns all items with a 3D model (for the select dropdown) */
@@ -29,12 +33,12 @@ export const getBenchmarkItems = async (): Promise<BenchmarkItem[]> => {
 
   return db.auctionItem.findMany({
     where: { pathToCanvas: { not: "" } },
-    select: { id: true, name: true, pathToCanvas: true, merkleBatchId: true },
+    select: { id: true, name: true, merkleBatchId: true },
     orderBy: { createdAt: "desc" },
   });
 };
 
-/** Signs the URL and queries the blockchain, returning both values + server-side timing */
+/** Queries the blockchain for the actual online-verification path. */
 export const runServerBenchmark = async (
   itemId: string
 ): Promise<BenchmarkServerResult | { error: string }> => {
@@ -50,25 +54,47 @@ export const runServerBenchmark = async (
 
   if (!item) return { error: "Item not found" };
 
-  const signStart = Date.now();
-  const signedUrl = signCanvasUrl(item.pathToCanvas);
-  const signDurationMs = Date.now() - signStart;
-
-  // Measure server→CDN fetch time (full download, same operation the proxy performs)
-  const serverFetchStart = Date.now();
-  const cdnResponse = await fetch(signedUrl);
-  await cdnResponse.arrayBuffer();
-  const serverFetchDurationMs = Date.now() - serverFetchStart;
-
-  const blockchainStart = Date.now();
-  const onChainData = await getOnChainData(itemId);
-  const blockchainQueryDurationMs = Date.now() - blockchainStart;
+  const blockchainStart = performance.now();
+  const lookup = await getOnChainDataDetailed(itemId);
+  const blockchainQueryDurationMs = performance.now() - blockchainStart;
 
   return {
     proxyPath: `/api/model/${itemId}/model.glb`,
-    signDurationMs,
-    serverFetchDurationMs,
-    onChainData,
+    onChainData: lookup.status === "registered" ? lookup.data : null,
+    blockchainStatus: lookup.status,
+    blockchainError: lookup.status === "unavailable" ? lookup.error : "",
     blockchainQueryDurationMs,
+  };
+};
+
+/**
+ * Runs the direct server→CDN diagnostic after the primary benchmark path so it
+ * cannot pre-warm the same run's client→proxy fetch.
+ */
+export const runServerFetchDiagnostic = async (
+  itemId: string
+): Promise<BenchmarkServerDiagnosticResult | { error: string }> => {
+  const user = await currentUser();
+  if (!user) return { error: "Unauthorized" };
+  const role = await currentRole();
+  if (role !== "ADMIN") return { error: "Unauthorized" };
+
+  const item = await db.auctionItem.findUnique({
+    where: { id: itemId },
+    select: { pathToCanvas: true },
+  });
+  if (!item) return { error: "Item not found" };
+
+  const signStart = performance.now();
+  const signedUrl = signCanvasUrl(item.pathToCanvas);
+  const signDurationMs = performance.now() - signStart;
+  const serverFetchStart = performance.now();
+  const response = await fetch(signedUrl, { cache: "no-store" });
+  if (!response.ok) return { error: `CDN fetch failed with HTTP ${response.status}` };
+  await response.arrayBuffer();
+
+  return {
+    signDurationMs,
+    serverFetchDurationMs: performance.now() - serverFetchStart,
   };
 };

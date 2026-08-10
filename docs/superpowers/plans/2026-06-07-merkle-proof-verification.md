@@ -1,12 +1,17 @@
 # Merkle Proof Offline Verification — Implementation Plan
 
+> **Historical implementation record.** This plan preserves the steps followed
+> in June 2026 and is not a current technical specification. The August 2026
+> audit supersedes its claims about gas savings, authenticity, trust anchors and
+> direct equivalence with CVE-2012-2459.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Extend BidSphere's blockchain integrity layer with Merkle proof–based offline verification, allowing users to verify 3D model authenticity with zero network calls using a proof bundle and a standalone `verify.html`.
 
 **Architecture:** A new `MerkleBatch` concept is layered on top of the existing per-model registration: an admin groups models into a batch, the server builds a SHA-256 Merkle tree, the root is stored on-chain via an upgraded `ModelRegistry` contract, and proof bundles are generated on demand. A self-contained `verify.html` (no server, no CDN) performs three-gate verification entirely in the browser.
 
-**Tech Stack:** Solidity 0.8.19, Hardhat, ethers.js v6, Next.js 15 App Router, Prisma + MongoDB, `crypto.subtle` (browser), TypeScript
+**Tech Stack at current audit:** Solidity 0.8.19, Hardhat, ethers.js v6, Next.js 16.1.6 App Router, Prisma + MongoDB, `crypto.subtle` (browser), TypeScript
 
 ---
 

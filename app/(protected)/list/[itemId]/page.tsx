@@ -4,7 +4,7 @@ import { getItemData } from "@/actions/getItemData";
 import { generateMerkleProof } from "@/actions/generateMerkleProof";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { useParams } from "next/navigation";
-import { useEffect, useRef, useTransition, useState } from "react";
+import { useCallback, useEffect, useRef, useTransition, useState } from "react";
 import { ClipLoader } from "react-spinners";
 import { toast } from "sonner";
 import AuctionItemCard from "./_components/AuctionItemCard";
@@ -36,7 +36,7 @@ const ItemPage = () => {
     });
   };
 
-  const fetchData = () => {
+  const fetchData = useCallback(() => {
     startTransition(() => {
       getItemData({ id: itemId }).then((data) => {
         if (data.error) {
@@ -47,13 +47,13 @@ const ItemPage = () => {
         }
       });
     });
-  };
+  }, [itemId]);
 
   useEffect(() => {
     if (initialFetchDone.current) return;
     initialFetchDone.current = true;
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   return (
     <div className="h-full w-full flex md:flex-row flex-col">

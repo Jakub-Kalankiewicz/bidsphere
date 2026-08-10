@@ -3,7 +3,8 @@ import { createHash } from "crypto";
 export type HexHash = string; // 0x-prefixed 32-byte hex
 
 function sha256pair(a: HexHash, b: HexHash): HexHash {
-  // Always sort so tree is deterministic regardless of insertion order
+  // Sorting makes each sibling pair commutative. The ordered leaf sequence still
+  // determines which hashes are grouped together and therefore affects the root.
   const [left, right] = a <= b ? [a, b] : [b, a];
   const buf = Buffer.concat([
     Buffer.from(left.slice(2), "hex"),
@@ -15,7 +16,7 @@ function sha256pair(a: HexHash, b: HexHash): HexHash {
 export interface MerkleTree {
   root: HexHash;
   leaves: HexHash[]; // ordered, padded to power-of-2 length
-  totalLeaves: number; // unpadded count — used to guard against duplicate-leaf attacks (CVE-2012-2459)
+  totalLeaves: number; // unpadded count — rejects proofs that target duplicated padding leaves
 }
 
 export interface MerkleProof {
@@ -48,7 +49,8 @@ export function buildMerkleTree(rawLeaves: HexHash[]): MerkleTree {
 }
 
 export function generateProof(tree: MerkleTree, leafIndex: number): MerkleProof {
-  // Guard: reject pad-zone indices to prevent duplicate-leaf attacks (CVE-2012-2459)
+  // Reject pad-zone indices to avoid an ambiguity analogous to duplicated-leaf
+  // Merkle-tree issues; this is not a claim of full CVE-2012-2459 equivalence.
   if (leafIndex >= tree.totalLeaves) {
     throw new Error(`leafIndex ${leafIndex} is out of range for ${tree.totalLeaves} real leaves`);
   }
@@ -76,8 +78,7 @@ export function verifyProof(
   totalLeaves: number,
   expectedRoot: HexHash
 ): boolean {
-  // Guard against duplicate-leaf attacks (CVE-2012-2459):
-  // a padded ghost entry at index >= totalLeaves would produce a valid-looking
+  // A padded ghost entry at index >= totalLeaves could produce a valid-looking
   // proof but refers to no real model — reject it here as a second gate.
   if (leafIndex >= totalLeaves) return false;
   let current = leaf;

@@ -12,7 +12,7 @@ export interface ProofBundle {
   merkleRoot: string;
   merkleProof: string[];
   leafIndex: number;
-  totalLeaves: number; // unpadded real leaf count — required for CVE-2012-2459 guard in verify.html
+  totalLeaves: number; // unpadded real leaf count — required for the pad-zone guard
   registeredAt: number;
   chainId: number;
   contractAddress: string;
@@ -42,7 +42,7 @@ export async function generateMerkleProof(
   const leafIndex = batch.modelIds.indexOf(itemId);
   if (leafIndex === -1) return { error: "Item not found in batch leaf list" };
 
-  // Server-side CVE-2012-2459 guard: reject if leafIndex falls in the pad zone.
+  // Reject a proof target that falls in the duplicated padding zone.
   // batch.modelIds.length is the unpadded real count; indices >= this are ghost entries.
   if (leafIndex >= batch.modelIds.length) {
     return { error: "leafIndex is out of range for real leaves (pad-zone attack rejected)" };
@@ -59,7 +59,7 @@ export async function generateMerkleProof(
     merkleRoot: batch.root,
     merkleProof: proof,
     leafIndex,
-    totalLeaves: batch.modelIds.length, // unpadded count for CVE-2012-2459 guard in verify.html
+    totalLeaves: batch.modelIds.length,
     registeredAt: Math.floor(batch.createdAt.getTime() / 1000),
     chainId: 11155111, // Sepolia
     contractAddress: process.env.BLOCKCHAIN_CONTRACT_ADDRESS ?? "",

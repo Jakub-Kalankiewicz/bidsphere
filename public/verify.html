@@ -8,7 +8,7 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 40px 16px; }
     h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 4px; }
-    .subtitle { color: #64748b; font-size: 0.875rem; margin-bottom: 32px; }
+    .subtitle { color: #64748b; font-size: 0.875rem; margin-bottom: 32px; text-align: center; }
     .drop-row { display: flex; gap: 16px; width: 100%; max-width: 700px; margin-bottom: 24px; flex-wrap: wrap; }
     .drop-zone { flex: 1; min-width: 200px; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 28px 16px; text-align: center; cursor: pointer; transition: border-color 0.2s, background 0.2s; background: white; }
     .drop-zone.has-file { border-color: #38bdf8; background: #f0f9ff; }
@@ -29,13 +29,14 @@
     .hash-label { color: #64748b; font-size: 0.75rem; margin-bottom: 2px; }
     .hash-val { font-family: monospace; font-size: 0.7rem; word-break: break-all; padding: 6px 8px; border-radius: 6px; background: #f1f5f9; }
     .meta { color: #64748b; font-size: 0.75rem; margin-top: 10px; }
+    .notice { margin: 8px 0; color: #92400e; font-size: 0.8rem; }
     footer { margin-top: 48px; color: #94a3b8; font-size: 0.75rem; text-align: center; }
     footer a { color: #38bdf8; }
   </style>
 </head>
 <body>
   <h1>BidSphere Offline Verifier</h1>
-  <p class="subtitle">Verify a 3D model's authenticity without any network connection.</p>
+  <p class="subtitle">Verify a 3D model's integrity against a locally trusted Merkle root without a network connection.</p>
 
   <div class="drop-row">
     <div class="drop-zone" id="glbZone">
@@ -56,184 +57,394 @@
   <div id="result"></div>
 
   <footer>
-    <p>This verifier works entirely in your browser — no data is sent anywhere.</p>
-    <p style="margin-top:6px">To independently confirm Merkle roots on-chain, visit
-      <a id="etherscanLink" href="#" target="_blank">Etherscan (Sepolia)</a>.
+    <p>This verifier works entirely in your browser — no model or proof data is sent anywhere.</p>
+    <p id="contractReference" style="display:none;margin-top:6px">
+      The configured contract can be inspected on
+      <a id="etherscanLink" href="#" target="_blank" rel="noopener noreferrer">Etherscan (Sepolia)</a>.
     </p>
   </footer>
 
   <script>
-    // ─── TRUSTED ROOTS TABLE ─────────────────────────────────────────────────
-    // Update this object after each batchRegister call.
-    // Format: { batchId: "0x<merkle-root>" }
-    const TRUSTED_ROOTS = {
-      1: "0x14c2340975e215267ff85896eb264043517479cabc3734437b3687133657ff4d",
-    };
-    const CONTRACT_ADDRESS = ""; // fill in after Sepolia deployment
-    // ─────────────────────────────────────────────────────────────────────────
+    /* VERIFY_CORE_START */
+    /* Generated from verify-core.mjs by scripts/build-offline-verifier.mjs. */
+    const HASH_PATTERN = /^0x[0-9a-fA-F]{64}$/;
+    const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
+    const MAX_PROOF_DEPTH = 64;
 
-    document.getElementById("etherscanLink").href =
-      `https://sepolia.etherscan.io/`;
+    function assertPlainObject(value, label = "proof bundle") {
+      if (value === null || typeof value !== "object" || Array.isArray(value)) {
+        throw new TypeError(`${label} must be a JSON object`);
+      }
+    }
 
+    function assertString(value, field, maxLength) {
+      if (typeof value !== "string" || value.length === 0 || value.length > maxLength) {
+        throw new TypeError(`${field} must be a non-empty string up to ${maxLength} characters`);
+      }
+    }
+
+    function assertInteger(value, field, minimum) {
+      if (!Number.isSafeInteger(value) || value < minimum) {
+        throw new TypeError(`${field} must be an integer greater than or equal to ${minimum}`);
+      }
+    }
+
+    function assertHash(value, field) {
+      if (typeof value !== "string" || !HASH_PATTERN.test(value)) {
+        throw new TypeError(`${field} must be a 0x-prefixed 32-byte hexadecimal value`);
+      }
+    }
+
+    function expectedProofDepth(totalLeaves) {
+      if (totalLeaves === 1) return 0;
+      return Math.ceil(Math.log2(totalLeaves));
+    }
+
+    function validateProofBundle(value) {
+      assertPlainObject(value);
+      assertString(value.modelId, "modelId", 256);
+      assertString(value.modelName, "modelName", 512);
+      assertHash(value.fileHash, "fileHash");
+      assertInteger(value.batchId, "batchId", 1);
+      assertHash(value.merkleRoot, "merkleRoot");
+      assertInteger(value.leafIndex, "leafIndex", 0);
+      assertInteger(value.totalLeaves, "totalLeaves", 1);
+      assertInteger(value.registeredAt, "registeredAt", 0);
+      assertInteger(value.chainId, "chainId", 1);
+
+      if (!Array.isArray(value.merkleProof)) {
+        throw new TypeError("merkleProof must be an array");
+      }
+      if (value.merkleProof.length > MAX_PROOF_DEPTH) {
+        throw new RangeError(`merkleProof cannot contain more than ${MAX_PROOF_DEPTH} hashes`);
+      }
+      for (const [index, hash] of value.merkleProof.entries()) {
+        assertHash(hash, `merkleProof[${index}]`);
+      }
+      if (value.leafIndex >= value.totalLeaves) {
+        throw new RangeError("leafIndex must identify a real leaf and cannot point into the padding zone");
+      }
+
+      const requiredDepth = expectedProofDepth(value.totalLeaves);
+      if (value.merkleProof.length !== requiredDepth) {
+        throw new RangeError(
+          `merkleProof length must be ${requiredDepth} for ${value.totalLeaves} real leaves`
+        );
+      }
+
+      if (
+        typeof value.contractAddress !== "string" ||
+        (value.contractAddress !== "" && !ADDRESS_PATTERN.test(value.contractAddress))
+      ) {
+        throw new TypeError("contractAddress must be empty or a 0x-prefixed 20-byte address");
+      }
+
+      return Object.freeze({
+        modelId: value.modelId,
+        modelName: value.modelName,
+        fileHash: value.fileHash.toLowerCase(),
+        batchId: value.batchId,
+        merkleRoot: value.merkleRoot.toLowerCase(),
+        merkleProof: Object.freeze(value.merkleProof.map((hash) => hash.toLowerCase())),
+        leafIndex: value.leafIndex,
+        totalLeaves: value.totalLeaves,
+        registeredAt: value.registeredAt,
+        chainId: value.chainId,
+        contractAddress: value.contractAddress.toLowerCase(),
+      });
+    }
+
+    function validateVerifierConfig(value) {
+      assertPlainObject(value, "verifier configuration");
+      assertInteger(value.chainId, "configured chainId", 1);
+      if (typeof value.contractAddress !== "string" || !ADDRESS_PATTERN.test(value.contractAddress)) {
+        throw new TypeError(
+          "configured contractAddress must be a non-empty 0x-prefixed 20-byte address"
+        );
+      }
+      return Object.freeze({
+        chainId: value.chainId,
+        contractAddress: value.contractAddress.toLowerCase(),
+      });
+    }
+
+    function hexToBytes(hash) {
+      const bytes = new Uint8Array(32);
+      for (let index = 0; index < bytes.length; index += 1) {
+        bytes[index] = Number.parseInt(hash.slice(2 + index * 2, 4 + index * 2), 16);
+      }
+      return bytes;
+    }
+
+    async function sha256Hex(data) {
+      const digest = await globalThis.crypto.subtle.digest("SHA-256", data);
+      return `0x${Array.from(new Uint8Array(digest), (byte) =>
+        byte.toString(16).padStart(2, "0")
+      ).join("")}`;
+    }
+
+    async function sha256Pair(first, second) {
+      assertHash(first, "first hash");
+      assertHash(second, "second hash");
+      const [left, right] = [first.toLowerCase(), second.toLowerCase()].sort();
+      const combined = new Uint8Array(64);
+      combined.set(hexToBytes(left), 0);
+      combined.set(hexToBytes(right), 32);
+      return sha256Hex(combined);
+    }
+
+    async function computeMerkleRoot(leaf, proof) {
+      let current = leaf.toLowerCase();
+      for (const sibling of proof) {
+        current = await sha256Pair(current, sibling);
+      }
+      return current;
+    }
+
+    async function verifyProofBundle(fileBytes, proofInput, trustedRoots, verifierConfig) {
+      const proof = validateProofBundle(proofInput);
+      assertPlainObject(trustedRoots, "trusted roots table");
+      const config = validateVerifierConfig(verifierConfig);
+
+      const computedHash = await sha256Hex(fileBytes);
+      const derivedRoot = await computeMerkleRoot(computedHash, proof.merkleProof);
+      const fileHashMatch = computedHash === proof.fileHash;
+      const proofConsistent = derivedRoot === proof.merkleRoot;
+      const configuredRoot = trustedRoots[proof.batchId];
+
+      let rootTrust = "unknown";
+      if (configuredRoot !== undefined) {
+        rootTrust =
+          typeof configuredRoot === "string" &&
+          HASH_PATTERN.test(configuredRoot) &&
+          configuredRoot.toLowerCase() === derivedRoot
+            ? "trusted"
+            : "mismatch";
+      }
+      const anchorMatch =
+        proof.chainId === config.chainId && proof.contractAddress === config.contractAddress;
+
+      return Object.freeze({
+        accepted: fileHashMatch && proofConsistent && rootTrust === "trusted" && anchorMatch,
+        computedHash,
+        derivedRoot,
+        fileHashMatch,
+        proofConsistent,
+        rootTrust,
+        anchorMatch,
+        metadataAuthenticated: false,
+        proof,
+      });
+    }
+    /* VERIFY_CORE_END */
+
+    // Trust-anchor configuration for a specific experiment. Update it only from
+    // an independently authenticated source; a proof bundle is not a trust anchor.
+    const VERIFIER_CONFIG = Object.freeze({
+      chainId: 11155111,
+      contractAddress: "",
+      // Add only roots obtained through an independently authenticated channel.
+      // Example: 1: "0x...64 hexadecimal characters..."
+      trustedRoots: Object.freeze({}),
+    });
+
+    const resultContainer = document.getElementById("result");
+    const verifyButton = document.getElementById("verifyBtn");
     let glbFile = null;
     let proofData = null;
 
-    function setupDropZone(zoneId, inputId, nameId, accept, onLoad) {
+    if (/^0x[0-9a-fA-F]{40}$/.test(VERIFIER_CONFIG.contractAddress)) {
+      const etherscanLink = document.getElementById("etherscanLink");
+      etherscanLink.href = `https://sepolia.etherscan.io/address/${VERIFIER_CONFIG.contractAddress}`;
+      document.getElementById("contractReference").style.display = "block";
+    }
+
+    function createElement(tagName, className, text) {
+      const element = document.createElement(tagName);
+      if (className) element.className = className;
+      if (text !== undefined) element.textContent = text;
+      return element;
+    }
+
+    function replaceResult(element) {
+      resultContainer.replaceChildren(element);
+    }
+
+    function showError(error) {
+      const box = createElement("div", "result-box result-red");
+      const title = createElement("div", "result-title", "Error during verification");
+      title.style.color = "#dc2626";
+      const message = createElement(
+        "p",
+        "",
+        error instanceof Error ? error.message : "Unknown verification error"
+      );
+      box.append(title, message);
+      replaceResult(box);
+    }
+
+    function appendHashRow(container, label, value, color) {
+      const row = createElement("div", "hash-row");
+      row.append(createElement("div", "hash-label", label));
+      const hash = createElement("div", "hash-val", value);
+      if (color) hash.style.color = color;
+      row.append(hash);
+      container.append(row);
+    }
+
+    function showResult(result) {
+      const integrityFailed = !result.fileHashMatch || !result.proofConsistent;
+      const anchorMismatch = !integrityFailed && !result.anchorMatch;
+      const unknownRoot =
+        !integrityFailed && result.anchorMatch && result.rootTrust === "unknown";
+      const trustMismatch =
+        !integrityFailed && result.anchorMatch && result.rootTrust === "mismatch";
+
+      const className = result.accepted
+        ? "result-green"
+        : unknownRoot
+          ? "result-orange"
+          : "result-red";
+      const titleText = result.accepted
+        ? "✓ Integrity verified against a trusted root"
+        : unknownRoot
+          ? "⚠ Proof valid — root is not in the trusted table"
+          : anchorMismatch
+            ? "⚠ Trust-anchor mismatch (chain or contract)"
+          : trustMismatch
+            ? "⚠ Trusted-root mismatch"
+            : "⚠ Integrity mismatch — file or proof may be modified";
+      const titleColor = result.accepted ? "#16a34a" : unknownRoot ? "#ea580c" : "#dc2626";
+
+      const box = createElement("div", `result-box ${className}`);
+      const title = createElement("div", "result-title", titleText);
+      title.style.color = titleColor;
+      box.append(title);
+
+      if (unknownRoot) {
+        box.append(
+          createElement(
+            "p",
+            "notice",
+            `The proof is internally consistent, but batch #${result.proof.batchId} is not configured as trusted. Compare the derived root with an independently authenticated source.`
+          )
+        );
+      }
+
+      appendHashRow(
+        box,
+        "Computed SHA-256 (this file):",
+        result.computedHash,
+        result.fileHashMatch ? "#16a34a" : "#dc2626"
+      );
+      appendHashRow(box, "Bundle file hash:", result.proof.fileHash);
+      appendHashRow(
+        box,
+        "Derived Merkle root (from proof path):",
+        result.derivedRoot,
+        result.proofConsistent ? "#16a34a" : "#dc2626"
+      );
+      appendHashRow(box, "Bundle Merkle root:", result.proof.merkleRoot);
+
+      box.append(
+        createElement(
+          "p",
+          "notice",
+          "Untrusted bundle metadata and structural fields (not bound into the Merkle leaf): " +
+            `modelName=${result.proof.modelName}, modelId=${result.proof.modelId}, ` +
+            `registeredAt=${result.proof.registeredAt}, leafIndex=${result.proof.leafIndex}, ` +
+            `totalLeaves=${result.proof.totalLeaves}.`
+        )
+      );
+      box.append(
+        createElement(
+          "div",
+          "meta",
+          `Matched trust context: chain ${result.proof.chainId}, contract ${result.proof.contractAddress}, batch #${result.proof.batchId}.`
+        )
+      );
+      replaceResult(box);
+    }
+
+    function updateButton() {
+      verifyButton.disabled = !(glbFile && proofData);
+    }
+
+    function setupDropZone(zoneId, inputId, nameId, onLoad) {
       const zone = document.getElementById(zoneId);
       const input = document.getElementById(inputId);
-      const nameEl = document.getElementById(nameId);
+      const nameElement = document.getElementById(nameId);
 
       zone.addEventListener("click", () => input.click());
-      zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("drag-over"); });
+      zone.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        zone.classList.add("drag-over");
+      });
       zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
-      zone.addEventListener("drop", (e) => {
-        e.preventDefault();
+      zone.addEventListener("drop", (event) => {
+        event.preventDefault();
         zone.classList.remove("drag-over");
-        const file = e.dataTransfer.files[0];
+        const file = event.dataTransfer?.files[0];
         if (file) handleFile(file);
       });
-      input.addEventListener("change", () => { if (input.files[0]) handleFile(input.files[0]); });
+      input.addEventListener("change", () => {
+        const file = input.files[0];
+        if (file) handleFile(file);
+      });
 
       function handleFile(file) {
-        nameEl.textContent = file.name;
+        nameElement.textContent = file.name;
         zone.classList.add("has-file");
         onLoad(file);
       }
     }
 
-    setupDropZone("glbZone", "glbInput", "glbName", ".glb", (file) => {
+    setupDropZone("glbZone", "glbInput", "glbName", (file) => {
       glbFile = file;
-      updateBtn();
+      updateButton();
     });
 
-    setupDropZone("proofZone", "proofInput", "proofName", ".json", (file) => {
+    setupDropZone("proofZone", "proofInput", "proofName", (file) => {
       const reader = new FileReader();
-      reader.onload = (e) => {
-        try { proofData = JSON.parse(e.target.result); } catch { proofData = null; }
-        updateBtn();
-      };
+      reader.addEventListener("load", (event) => {
+        try {
+          proofData = validateProofBundle(JSON.parse(event.target.result));
+          resultContainer.replaceChildren();
+        } catch (error) {
+          proofData = null;
+          showError(error);
+        }
+        updateButton();
+      });
+      reader.addEventListener("error", () => {
+        proofData = null;
+        showError(new Error("The proof file could not be read"));
+        updateButton();
+      });
       reader.readAsText(file);
     });
 
-    function updateBtn() {
-      document.getElementById("verifyBtn").disabled = !(glbFile && proofData);
-    }
-
-    // ─── Merkle helpers (mirrored from lib/merkle.ts) ─────────────────────
-    async function sha256hex(data) {
-      const buf = await crypto.subtle.digest("SHA-256", data);
-      return "0x" + [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
-    }
-
-    function hexToBytes(hex) {
-      const h = hex.startsWith("0x") ? hex.slice(2) : hex;
-      const arr = new Uint8Array(h.length / 2);
-      for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.slice(i*2, i*2+2), 16);
-      return arr;
-    }
-
-    async function sha256pair(a, b) {
-      const [left, right] = a <= b ? [a, b] : [b, a];
-      const combined = new Uint8Array([...hexToBytes(left), ...hexToBytes(right)]);
-      return sha256hex(combined);
-    }
-
-    async function computeRoot(leaf, proof, leafIndex) {
-      let current = leaf;
-      let index = leafIndex;
-      for (const sibling of proof) {
-        current = await sha256pair(current, sibling);
-        index = Math.floor(index / 2);
-      }
-      return current;
-    }
-    // ──────────────────────────────────────────────────────────────────────
-
-    document.getElementById("verifyBtn").addEventListener("click", async () => {
-      const btn = document.getElementById("verifyBtn");
-      btn.disabled = true;
-      btn.textContent = "Verifying...";
-      document.getElementById("result").innerHTML = "";
+    verifyButton.addEventListener("click", async () => {
+      verifyButton.disabled = true;
+      verifyButton.textContent = "Verifying...";
+      resultContainer.replaceChildren();
 
       try {
-        // Gate 1: CVE-2012-2459 duplicate-leaf attack guard.
-        // Reject bundles where leafIndex >= totalLeaves (pad-zone ghost entries).
-        if (proofData.leafIndex >= proofData.totalLeaves) {
-          throw new Error(
-            `leafIndex ${proofData.leafIndex} is >= totalLeaves ${proofData.totalLeaves} — possible duplicate-leaf attack (CVE-2012-2459)`
-          );
-        }
-
-        // Gate 2: hash the GLB
-        const glbBuffer = await glbFile.arrayBuffer();
-        const computedHash = await sha256hex(glbBuffer);
-
-        // Gate 3: check file hash matches bundle
-        const fileHashMatch = computedHash.toLowerCase() === proofData.fileHash.toLowerCase();
-
-        // Gate 4: walk Merkle proof to derive root
-        const derivedRoot = await computeRoot(computedHash, proofData.merkleProof, proofData.leafIndex);
-        const proofConsistent = derivedRoot.toLowerCase() === proofData.merkleRoot.toLowerCase();
-
-        // Gate 5: check derived root against trusted table
-        const trustedRoot = TRUSTED_ROOTS[proofData.batchId];
-        const rootTrusted = trustedRoot
-          ? trustedRoot.toLowerCase() === derivedRoot.toLowerCase()
-          : null; // null = not in table yet
-
-        showResult({ computedHash, proofData, fileHashMatch, proofConsistent, derivedRoot, rootTrusted });
-      } catch (err) {
-        document.getElementById("result").innerHTML =
-          `<div class="result-box result-red"><div class="result-title" style="color:#dc2626">Error during verification</div><p>${err.message}</p></div>`;
+        if (!glbFile || !proofData) throw new Error("Select both the GLB file and proof bundle");
+        const result = await verifyProofBundle(
+          await glbFile.arrayBuffer(),
+          proofData,
+          VERIFIER_CONFIG.trustedRoots,
+          VERIFIER_CONFIG
+        );
+        showResult(result);
+      } catch (error) {
+        showError(error);
+      } finally {
+        verifyButton.disabled = false;
+        verifyButton.textContent = "Verify";
       }
-
-      btn.disabled = false;
-      btn.textContent = "Verify";
     });
-
-    function showResult({ computedHash, proofData, fileHashMatch, proofConsistent, derivedRoot, rootTrusted }) {
-      const tampered = !fileHashMatch || !proofConsistent;
-      const unknownRoot = !tampered && rootTrusted === null;
-
-      let cls = tampered ? "result-red" : unknownRoot ? "result-orange" : "result-green";
-      let title = tampered
-        ? "⚠ Integrity Mismatch — File May Be Tampered"
-        : unknownRoot
-          ? "⚠ Proof Valid — Root Not in Trusted Table"
-          : "✓ Fully Verified — File Is Authentic";
-      let titleColor = tampered ? "#dc2626" : unknownRoot ? "#ea580c" : "#16a34a";
-
-      let html = `<div class="result-box ${cls}">
-        <div class="result-title" style="color:${titleColor}">${title}</div>`;
-
-      if (unknownRoot) {
-        html += `<p style="margin:8px 0;color:#92400e;font-size:0.8rem">
-          The Merkle proof is internally valid but batch #${proofData.batchId} is not yet in this verifier's trusted roots table.
-          Manually compare the derived root below against the contract on
-          <a href="https://sepolia.etherscan.io/address/${CONTRACT_ADDRESS}" target="_blank" style="color:#0ea5e9">Etherscan</a>
-          or the published root in the thesis appendix.
-        </p>`;
-      }
-
-      html += `
-        <div class="hash-row"><div class="hash-label">Computed SHA-256 (this file):</div>
-          <div class="hash-val" style="color:${fileHashMatch ? "#16a34a" : "#dc2626"}">${computedHash}</div></div>
-        <div class="hash-row"><div class="hash-label">Bundle file hash:</div>
-          <div class="hash-val">${proofData.fileHash}</div></div>
-        <div class="hash-row"><div class="hash-label">Derived Merkle root (from proof path):</div>
-          <div class="hash-val" style="color:${proofConsistent ? "#16a34a" : "#dc2626"}">${derivedRoot}</div></div>
-        <div class="hash-row"><div class="hash-label">Bundle Merkle root:</div>
-          <div class="hash-val">${proofData.merkleRoot}</div></div>
-        <div class="meta">
-          Model: <strong>${proofData.modelName}</strong> &nbsp;|&nbsp;
-          Batch #${proofData.batchId} &nbsp;|&nbsp;
-          Leaf index: ${proofData.leafIndex} &nbsp;|&nbsp;
-          Registered: ${new Date(proofData.registeredAt * 1000).toLocaleString()}
-        </div>
-      </div>`;
-
-      document.getElementById("result").innerHTML = html;
-    }
   </script>
 </body>
 </html>

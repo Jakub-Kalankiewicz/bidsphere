@@ -38,7 +38,19 @@ const BlockchainPage = () => {
     );
   };
 
-  useEffect(() => { loadRegistry(); }, []);
+  useEffect(() => {
+    Promise.all([getBlockchainRegistry(), getPendingBatchItems()]).then(
+      ([registry, pending]) => {
+        setLoading(false);
+        if ("error" in registry) {
+          toast.error(registry.error);
+          return;
+        }
+        setEntries(registry);
+        setPendingItems(pending);
+      }
+    );
+  }, []);
 
   const handleTamper = (id: string) => {
     setPendingId(id);

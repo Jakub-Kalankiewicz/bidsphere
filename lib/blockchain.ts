@@ -1,6 +1,11 @@
 import { ethers } from "ethers";
 import { createHash } from "crypto";
 import artifact from "@/lib/contracts/ModelRegistry.json";
+import {
+  lookupModelOnChain,
+  type ModelRegistryReader,
+  type OnChainLookupResult,
+} from "@/lib/blockchain-lookup";
 
 type Artifact = { address: string; abi: ethers.InterfaceAbi };
 const { address, abi } = artifact as Artifact;
@@ -58,15 +63,15 @@ export async function registerModelOnChain(
 export async function getOnChainData(
   modelId: string
 ): Promise<{ hash: string; timestamp: number } | null> {
-  try {
-    const contract = getContract(false);
-    const isReg: boolean = await contract.isRegistered(modelId);
-    if (!isReg) return null;
-    const [hash, timestamp]: [string, bigint] = await contract.getModel(modelId);
-    return { hash, timestamp: Number(timestamp) };
-  } catch {
-    return null;
-  }
+  const result = await getOnChainDataDetailed(modelId);
+  return result.status === "registered" ? result.data : null;
+}
+
+export async function getOnChainDataDetailed(
+  modelId: string
+): Promise<OnChainLookupResult> {
+  const contract = getContract(false) as unknown as ModelRegistryReader;
+  return lookupModelOnChain(modelId, contract);
 }
 
 /**

@@ -1,5 +1,10 @@
 # Merkle Proof Offline Verification — Design Spec
 
+> **Historical design record.** This file documents assumptions used before
+> the August 2026 thesis audit. Current code and thesis artifacts supersede its
+> claims about framework versions, gas savings, authenticity, trust anchors and
+> direct equivalence with CVE-2012-2459.
+
 **Date:** 2026-06-07  
 **Branch:** `feature/merkle-proof-verification`  
 **Thesis title (WIP):** "Data security mechanisms for browser rendering"

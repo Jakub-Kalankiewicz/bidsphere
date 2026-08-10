@@ -20,11 +20,11 @@
        danych modeli 3D z hybrydową walidacją offline}
 
 \author{
-  \IEEEauthorblockN{Jakub Kalaniewicz}
-  \IEEEauthorblockA{Wydział Informatyki i Zarządzania\\
-    Politechnika Wrocławska\\
-    Wrocław, Polska\\
-    \texttt{jakub.kalaniewicz@student.pwr.edu.pl}}
+  \IEEEauthorblockN{Jakub Kalankiewicz}
+  \IEEEauthorblockA{Wydział Elektroniki i Technik Informacyjnych\\
+    Politechnika Warszawska\\
+    Warszawa, Polska\\
+    \texttt{[DO UZUPEŁNIENIA: adres e-mail PW]}}
 }
 
 % ============================================================
@@ -43,17 +43,19 @@ serwera. Skompromitowany serwer może dostarczyć zmodyfikowany
 plik przez poprawne połączenie HTTPS, a odbiorca nie będzie
 w~stanie tego wykryć. W~odpowiedzi zaprojektowano dwuwarstwowy
 system ochrony łączący uwierzytelniony dostęp przez Cloudinary
-z kryptograficzną weryfikacją opartą na blockchainie Ethereum
-(sieć testowa Sepolia). Kluczowym wkładem jest implementacja
+z kryptograficzną weryfikacją opartą na blockchainie Ethereum.
+Pomiary podstawowe są wykonywane lokalnie, a~wybrane przypadki
+zostaną następnie potwierdzone w~sieci testowej Sepolia. Kluczowym wkładem jest implementacja
 off-chainowego drzewa Merkle, w~którym na blockchain trafia
 wyłącznie korzeń (Merkle Root), co umożliwia całkowicie
 offline weryfikację pliku przy użyciu samodzielnego pliku
 \texttt{verify.html} bez żadnych wywołań sieciowych.
-Eksperymenty wykazały skrócenie czasu weryfikacji
-z~około~400\,ms (zapytanie RPC) do~około~12\,ms (obliczenia
-lokalne) oraz redukcję kosztów gazu o~ponad~98\% przy
-rejestracji partii modeli w~porównaniu z~rejestracją
-indywidualną.
+Przygotowana instrumentacja umożliwia powtarzalne porównanie
+czasu zapytania RPC z~lokalnym obliczeniem skrótu i~dowodu
+Merkle oraz pomiar kosztu gazu dla różnych rozmiarów partii.
+Wartości liczbowe przedstawione w~bieżącej wersji artykułu są
+wstępne i~zostaną zastąpione wynikami serii obejmujących trzy
+pomiary rozgrzewkowe i~30~powtórzeń.
 \end{abstract}
 
 % ── Słowa kluczowe ───────────────────────────────────────────
@@ -97,7 +99,7 @@ tych właściwości.
 \section{Architektura Platformy BidSphere\\
          i Wielowarstwowy System Ochrony}
 
-BidSphere zbudowano w~oparciu o~Next.js~15 z~App~Router, bazę
+BidSphere zbudowano w~oparciu o~Next.js~16.1.6 z~App~Router, bazę
 MongoDB zarządzaną przez ORM~Prisma oraz front-end oparty
 na~TailwindCSS. Komunikacja z~blockchainem odbywa się przez
 bibliotekę ethers.js~v6; smart kontrakty napisano w~Solidity
@@ -112,9 +114,10 @@ podpisanego URL ważnego przez~1~godzinę. Każde żądanie modelu
 przechodzi przez serwerowe proxy (\texttt{/api/model/{[}itemId{]}}),
 które weryfikuje sesję, generuje podpisany URL i~strumieniuje
 odpowiedź z~nagłówkiem \texttt{Cache-Control: no-store},
-uniemożliwiając buforowanie po~stronie klienta. Każdy dostęp
-jest rejestrowany w~kolekcji \texttt{ModelAccess} w~MongoDB,
-tworząc pełną ścieżkę audytu.
+uniemożliwiając buforowanie po~stronie klienta. Obecna implementacja
+rejestruje wizytę na~stronie modelu w~kolekcji \texttt{ModelAccess};
+sam endpoint strumieniujący plik nie zapisuje osobnego zdarzenia,
+co ogranicza kompletność ścieżki audytu.
 
 \subsection{Druga warstwa: kryptograficzna integralność}
 
@@ -138,9 +141,8 @@ danych eksperymentalnych.
 
 Drzewo Merkle jest binarnym drzewem skrótów, gdzie każdy liść
 odpowiada skrótowi SHA-256 jednego modelu. Aby zapewnić
-determinizm niezależny od~kolejności wstawiania, przy
-wyznaczaniu węzła wewnętrznego zastosowano sortowanie
-leksykograficzne pary dzieci przed konkatenacją:
+jednoznaczność kolejności wewnątrz każdej pary rodzeństwa,
+przed konkatenacją zastosowano sortowanie leksykograficzne:
 \begin{equation}
   H_p = \mathrm{SHA\text{-}256}\!\left(
         \min(H_l,H_r)\;\|\;\max(H_l,H_r)\right).
@@ -150,7 +152,9 @@ duplikację ostatniego liścia, zgodnie z~podejściem stosowanym
 w~protokole Bitcoin~\cite{nakamoto2008}. Implementacja
 w~TypeScript (plik \texttt{lib/merkle.ts}) zawiera funkcje
 \texttt{buildMerkleTree()}, \texttt{generateProof()}
-oraz \texttt{verifyProof()}.
+oraz \texttt{verifyProof()}. Sortowanie par nie uniezależnia
+korzenia od~kolejności całej listy liści, dlatego aplikacja
+utrzymuje stabilną kolejność modeli w~partii.
 
 \subsection{Smart kontrakt ModelRegistry}
 
@@ -165,30 +169,42 @@ mapping(string => uint256)
 Funkcja \texttt{registerMerkleRoot()} rejestruje korzeń
 i~aktualizuje mapowanie dla~wszystkich modeli w~partii
 w~jednej transakcji, emitując zdarzenie
-\texttt{MerkleRootRegistered}. Dzięki temu na~blockchain trafia
-jeden wpis zamiast~$N$, co radykalnie obniża koszty.
+\texttt{MerkleRootRegistered}. Kontrakt zapisuje jednak również
+tablicę identyfikatorów i~aktualizuje mapowanie dla każdego
+modelu, dlatego koszt tej operacji rośnie z~liczebnością partii
+i~musi zostać wyznaczony eksperymentalnie.
 
 \subsection{Trójstopniowa weryfikacja offline}
 
 Plik \texttt{verify.html} jest samodzielnym weryfikatorem
 niewymagającym żadnych zależności zewnętrznych. Weryfikacja
-przebiega w~sześciu krokach. Krok~1 (zabezpieczenie przed
-CVE-2012-2459~\cite{cve2012}): sprawdzenie warunku
+przebiega w~siedmiu krokach. Krok~1: walidacja struktury
+pakietu i~sprawdzenie warunku
 \texttt{leafIndex < totalLeaves}. Bez~tej walidacji
 sfałszowany wpis z~indeksem w~strefie dopełnienia drzewa
-generowałby poprawnie wyglądający dowód Merkle. Krok~2:
+generowałby poprawnie wyglądający dowód Merkle. Jest to ochrona
+przed niejednoznacznością analogiczną do problemów z~duplikacją
+liści, lecz nie dowód pełnej zgodności modelu ataku z
+CVE-2012-2459~\cite{cve2012}. Krok~2:
 obliczenie skrótu SHA-256 pliku GLB przez
 \texttt{crypto.subtle}. Krok~3: porównanie z~\texttt{fileHash}
 z~pakietu dowodowego. Krok~4: iteracyjna rekonstrukcja korzenia
 przez haszowanie liścia z~kolejnymi węzłami rodzeństwa.
-Krok~5: porównanie ze~skrótem z~pakietu. Krok~6: sprawdzenie
-rekonstruowanego korzenia w~wbudowanej tablicy zaufanych
+Krok~5: porównanie ze~skrótem z~pakietu. Krok~6: porównanie
+identyfikatora sieci i~adresu kontraktu z~lokalną konfiguracją.
+Krok~7: sprawdzenie rekonstruowanego korzenia w~wbudowanej tablicy zaufanych
 korzeni. Tablica ta jest kotwicą zaufania (ang.~\textit{trust
 anchor}), bez~której atakujący mógłby wygenerować spójny
 wewnętrznie, lecz całkowicie sfabrykowany pakiet dowodowy.
-Wyznaczony korzeń jest zawsze wyświetlany w~interfejsie,
-umożliwiając ręczną weryfikację przez~Etherscan lub~aneks
-pracy dyplomowej.
+Adres kontraktu i~korzenie muszą zostać uzupełnione na podstawie
+niezależnie uwierzytelnionego źródła; pusta konfiguracja celowo
+uniemożliwia akceptację dowodu. Wyznaczony korzeń jest zawsze
+wyświetlany w~interfejsie, umożliwiając późniejsze porównanie
+z~Etherscan lub~aneksem pracy dyplomowej. Pola takie jak nazwa,
+identyfikator modelu, czas rejestracji, indeks i~liczba liści nie
+są częścią haszowanego liścia i~interfejs oznacza je jako
+nieuwierzytelnione dane pakietu; indeks i~liczba liści służą
+wyłącznie kontroli strukturalnej.
 
 % ── 4. Wyniki ────────────────────────────────────────────────
 \section{Analiza Eksperymentalna i Wyniki}
@@ -202,7 +218,7 @@ Benchmark; koszty gazu zmierzono narzędziem
 \texttt{hardhat-gas-reporter}.
 
 \begin{table}[htbp]
-\caption{Porównanie scenariuszy weryfikacji integralności modeli 3D}
+\caption{Wstępne wartości orientacyjne; wyniki końcowe wymagają pełnej serii pomiarowej}
 \label{tab:scenarios}
 \centering
 \renewcommand{\arraystretch}{1.2}
@@ -213,41 +229,43 @@ Benchmark; koszty gazu zmierzono narzędziem
 \midrule
 Brak ochrony   & Nie  & Nigdy & 0          & 0           \\
 Tylko SSL/TLS  & Tak  & Nie   & —          & 0           \\
-Blockchain RPC & Tak  & Tak   & 30 / 300--500$^*$   & $\sim$94\,000 \\
+Blockchain RPC & Tak  & Tak   & $\sim$30$^*$   & $\sim$94\,000$^*$ \\
 Merkle offline & \textbf{Nie} & \textbf{Tak} &
-                 \textbf{$\sim$5} & \textbf{1\,700--17\,000} \\
+                 \textbf{$\sim$5$^*$} & \textbf{zależny od $N$} \\
 \bottomrule
 \end{tabular}
-{\footnotesize $^*$30\,ms — lokalny węzeł Hardhat;
-300--500\,ms — publiczny RPC (Alchemy/Sepolia).}
+{\footnotesize $^*$Pojedyncze pomiary wstępne, wyłączone
+z~wnioskowania końcowego.}
 \end{table}
 
 \subsection{Czas weryfikacji}
 
-Czas~około~5\,ms w~scenariuszu~4 obejmuje obliczenie SHA-256
-pliku GLB (zmierzono~4\,ms dla~pliku~5,92\,MB przy użyciu
-\texttt{crypto.subtle}) oraz przejście ścieżki Merkle
-(3--5~operacji SHA-256 na~32~bajtach, poniżej~1\,ms).
-W~scenariuszu~3 na~lokalnym węźle Hardhat uzyskano~30\,ms,
-jednak w~środowisku produkcyjnym z~publicznym węzłem RPC
-(Alchemy/Sepolia) opóźnienie wynosi~300--500\,ms ze~względu
-na~latencję sieci. Przyspieszenie względem środowiska
-docelowego wynosi zatem ponad~60$\times$.
+Pojedynczy pomiar wstępny dla pliku 5,92\,MB wskazał około
+4\,ms dla SHA-256 i~czas poniżej~1\,ms dla przejścia krótkiej
+ścieżki Merkle. Lokalny odczyt z~węzła Hardhat trwał około
+30\,ms. Wartości te służą wyłącznie do kontroli instrumentacji:
+nie pozwalają wyznaczyć rozrzutu ani ekstrapolować opóźnienia
+publicznego RPC. Badanie końcowe obejmie dwa profile sieciowe,
+trzy rozmiary GLB, trzy pomiary rozgrzewkowe oraz 30 zapisanych
+powtórzeń każdej konfiguracji. Raportowane będą mediana,
+kwartyle i~p95 oraz pełne dane surowe.
 
 \subsection{Analiza kosztów gazu}
 
-Pomiary narzędziem \texttt{hardhat-gas-reporter} wykazały,
-że~\texttt{registerModel} kosztuje stale~93\,997~jednostek
-gazu. Koszt wywołania \texttt{registerMerkleRoot} wynosi
-od~128\,955 do~210\,006~gazu (średnio~170\,218) i~rośnie
-liniowo z~liczebnością partii ze~względu na~aktualizację
-mapowania \texttt{modelToBatchId} dla~każdego modelu.
-Koszt jednostkowy na~model wynosi zatem~170\,218\,/\,$N$.
-Przy partii 10~modeli daje to~17\,022~gazu/model (redukcja
-o~82\%), a~przy~100~modelach~1\,702~gazu/model (redukcja
-o~ponad~98\%). Stały koszt rejestracji korzenia
-(\texttt{bytes32} SSTORE~$\approx$\,20\,000~gazu) jest
-w~pełni amortyzowany już dla~kilku modeli.
+Wstępny raport Hardhat wskazał około 94\,000 jednostek gazu
+dla pojedynczego wywołania \texttt{registerModel}; nie jest to
+jeszcze estymator wyniku końcowego. Funkcja
+\texttt{registerMerkleRoot} zapisuje korzeń i~tablicę
+identyfikatorów oraz aktualizuje mapowanie
+\texttt{modelToBatchId} dla każdego modelu. Nie można zatem
+dzielić kosztu zmierzonego dla jednej partii przez dowolne~$N$
+ani traktować kosztu rejestracji korzenia jako stałego.
+Dedykowany harness
+mierzy rzeczywiste \texttt{gasUsed} dla partii 1, 2, 5, 10,
+25, 50 i~100 modeli, porównując sumę~$N$ indywidualnych
+transakcji z~jedną transakcją Merkle na świeżo wdrożonych
+kontraktach. Wyniki: \textbf{[DO UZUPEŁNIENIA PO SERII 30
+POWTÓRZEŃ]}.
 
 % ── 5. Wnioski ───────────────────────────────────────────────
 \section{Wnioski i Perspektywy Dalszych Badań}
@@ -258,10 +276,12 @@ bezpieczeństwa, której sam protokół SSL/TLS nie jest
 w~stanie wypełnić. Płyną z~tego trzy wnioski: (1)~samo
 szyfrowanie transportu nie wystarczy dla~danych o~krytycznym
 znaczeniu; (2)~kombinacja drzewa Merkle z~blockchainem
-umożliwia weryfikację całkowicie offline przy jednoczesnej
-redukcji kosztów; (3)~mitygacja CVE-2012-2459 przez walidację
-zakresu indeksu liścia jest konieczna dla~bezpieczeństwa
-produkcyjnego.
+umożliwia weryfikację całkowicie offline względem wcześniej
+pozyskanego, zaufanego korzenia; (3)~walidacja zakresu indeksu
+liścia odrzuca dowody wskazujące zduplikowaną strefę
+dopełnienia. Skala oszczędności gazu pozostaje pytaniem
+eksperymentalnym, a~dystrybucja korzeni i~klucz właściciela
+kontraktu pozostają punktami zaufania.
 
 Pod~względem aplikacyjnym system może znaleźć zastosowanie
 w~bazach wojskowych pracujących w~izolowanych sieciach
@@ -294,8 +314,8 @@ Version~1.3,'' RFC~8446, Internet Engineering Task Force,
 sierpień 2018.
 
 \bibitem{cve2012}
-``CVE-2012-2459: Bitcoin Merkle tree duplicate-leaf
-vulnerability,'' National Vulnerability Database, NIST, 2012.
+``CVE-2012-2459 Detail,'' National Vulnerability Database,
+NIST, 2012.
 [Online]. Dostępny:
 \url{https://nvd.nist.gov/vuln/detail/CVE-2012-2459}
 

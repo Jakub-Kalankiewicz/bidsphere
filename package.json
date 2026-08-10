@@ -7,9 +7,15 @@
     "postinstall": "prisma generate",
     "blockchain:deploy": "cd contracts && npx hardhat run scripts/deploy.ts --network localhost",
     "dev": "next dev",
+    "build:verifier": "node scripts/build-offline-verifier.mjs",
+    "prebuild": "npm run build:verifier",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint .",
+    "test:verify": "npm run build:verifier && node --test tests/verify-core.test.mjs tests/verify-html-security.test.mjs",
+    "test:benchmark": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/benchmark.test.ts tests/blockchain-lookup.test.ts tests/merkle-browser.test.ts",
+    "test:merkle": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test lib/merkle.test.ts",
+    "analyze:benchmark": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/analyze-benchmark.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
@@ -64,7 +70,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.0.1",
-    "eslint": "^8",
+    "eslint": "^9.39.5",
     "eslint-config-next": "^16.1.6",
     "postcss": "^8",
     "prisma": "^6.19.2",
