@@ -183,6 +183,20 @@ function validatePlannedOperations(raw, invalid = fail) {
   }
 }
 
+function validateMatchedTransactionPayloads(raw, invalid) {
+  const canonicalOperations = buildCanonicalOperations(raw.seriesId);
+  for (const [index, canonical] of canonicalOperations.entries()) {
+    const record = raw.transactions[index];
+    if (
+      !Array.isArray(record.modelIds) ||
+      !sameStrings(record.modelIds, canonical.modelIds) ||
+      record.merkleRoot !== canonical.merkleRoot
+    ) {
+      invalid("matched transaction payload does not match the canonical benchmark plan");
+    }
+  }
+}
+
 export function summarizeFive(values) {
   if (!Array.isArray(values) || values.length !== 5) {
     throw new Error("Expected exactly five observations");
@@ -495,6 +509,7 @@ export function validateCompletedMatchedHardhatResult(rawValue) {
     experimentFee += actualFee;
   }
   validatePlannedOperations(raw, matchedFail);
+  validateMatchedTransactionPayloads(raw, matchedFail);
 
   if (!Array.isArray(raw.rounds) || raw.rounds.length !== 12) {
     matchedFail("round topology must contain exactly twelve aggregates");

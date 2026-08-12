@@ -264,10 +264,13 @@ function createCompletedRaw() {
 
 function createMatchedRaw(codeVersion = "0123456789abcdef0123456789abcdef01234567") {
   const original = createCompletedRaw();
-  const transactions = original.transactions.map((record) => {
+  const transactions = original.transactions.map((record, index) => {
     const merkle = record.kind === "merkle-registration";
+    const planned = original.plannedOperations[index];
     const matched = {
       ...record,
+      modelIds: [...planned.modelIds],
+      merkleRoot: planned.merkleRoot,
       contractAddress: original.contractAddresses[record.strategy],
       batchCountBefore: merkle ? record.round : null,
       batchCountAfter: merkle ? record.round + 1 : null,
@@ -389,6 +392,28 @@ test("rejects non-matched local evidence, broken counters, and code-version mism
     }),
     /code version/i
   );
+});
+
+test("rejects missing or mutated matched transaction payload fields", () => {
+  const mutations = [
+    ["deployment model IDs", "deployment:individual", (record) => { delete record.modelIds; }],
+    ["deployment Merkle root", "deployment:merkle", (record) => { record.merkleRoot = `0x${"11".repeat(32)}`; }],
+    ["individual model IDs", "individual:1:0", (record) => { record.modelIds = ["f".repeat(24)]; }],
+    ["individual Merkle root", "individual:1:1", (record) => { record.merkleRoot = `0x${"22".repeat(32)}`; }],
+    ["Merkle model IDs", "merkle:2", (record) => { record.modelIds = record.modelIds.slice(1); }],
+    ["Merkle root", "merkle:3", (record) => { delete record.merkleRoot; }],
+  ];
+
+  for (const [label, operationId, mutate] of mutations) {
+    const matched = createMatchedRaw();
+    const record = matched.transactions.find((candidate) => candidate.operationId === operationId);
+    mutate(record);
+    assert.throws(
+      () => validateCompletedMatchedHardhatResult(matched),
+      /payload|model IDs|Merkle root|canonical/i,
+      label
+    );
+  }
 });
 
 test("summarizes exactly five observations without p95", () => {
