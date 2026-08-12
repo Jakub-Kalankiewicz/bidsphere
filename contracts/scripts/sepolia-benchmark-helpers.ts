@@ -59,6 +59,49 @@ export interface BenchmarkTransactionRecord {
   endToEndMs: number | null;
 }
 
+export interface BenchmarkRoundAggregate {
+  strategy: BenchmarkStrategy;
+  round: number;
+  warmup: boolean;
+  transactionCount: number;
+  totalGasUsed: string;
+  totalActualFeeWei: string;
+  wallClockMs: number;
+}
+
+export interface SepoliaBenchmarkResult {
+  schemaVersion: 1;
+  seriesId: string;
+  startedAtUtc: string;
+  completedAtUtc: string | null;
+  status: "running" | "completed" | "aborted";
+  abortReason: string | null;
+  network: "sepolia";
+  chainId: 11155111;
+  rpcProviderLabel: string | null;
+  codeVersion: string;
+  deployerAddress: string;
+  contractAddresses: { individual: string | null; merkle: string | null };
+  configuration: {
+    batchSize: 10;
+    warmupRounds: 1;
+    recordedRounds: 5;
+    receiptConfirmations: 1;
+    receiptTimeoutMs: 600000;
+    aggregateGasCeiling: "16500000";
+    approvedMaximumWei: string;
+  };
+  plannedOperations: Array<Omit<BenchmarkOperation, "gasLimit"> & { gasLimit: string }>;
+  transactions: BenchmarkTransactionRecord[];
+  rounds: BenchmarkRoundAggregate[];
+  totalGasUsed: string;
+  totalActualFeeWei: string;
+  reservedPendingWei: string;
+  balanceBeforeWei: string;
+  balanceAfterWei: string | null;
+  runtime: { node: string; hardhat: string };
+}
+
 export interface BuildConfirmedTransactionRecordInput {
   operation: BenchmarkOperation;
   transactionHash: string;
