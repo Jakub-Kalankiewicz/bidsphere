@@ -1,11 +1,46 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
-import { join } from "node:path";
-import test from "node:test";
+import { dirname, join, resolve } from "node:path";
+import { after, before, test } from "node:test";
 import { tmpdir } from "node:os";
+import { promisify } from "node:util";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { writeBenchmarkCheckpoint } from "../contracts/scripts/sepolia-benchmark-checkpoint.ts";
 import type { SepoliaBenchmarkResult } from "../contracts/scripts/sepolia-benchmark-helpers.ts";
+
+type CheckpointWriter = (
+  outputPath: string,
+  result: SepoliaBenchmarkResult,
+  forbiddenValues: readonly string[]
+) => Promise<void>;
+
+const run = promisify(execFile);
+const contractsDirectory = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../contracts"
+);
+let compiledDirectory: string | undefined;
+let writeBenchmarkCheckpoint: CheckpointWriter;
+
+before(async () => {
+  compiledDirectory = await mkdtemp(join(tmpdir(), "bidsphere-checkpoint-build-"));
+  await run("npx", ["tsc", "--outDir", compiledDirectory], {
+    cwd: contractsDirectory,
+  });
+  const checkpointModule = (await import(
+    pathToFileURL(
+      join(compiledDirectory, "scripts", "sepolia-benchmark-checkpoint.js")
+    ).href
+  )) as { writeBenchmarkCheckpoint: CheckpointWriter };
+  writeBenchmarkCheckpoint = checkpointModule.writeBenchmarkCheckpoint;
+});
+
+after(async () => {
+  if (compiledDirectory) {
+    await rm(compiledDirectory, { recursive: true, force: true });
+  }
+});
 
 function createRunningResult(): SepoliaBenchmarkResult {
   return {

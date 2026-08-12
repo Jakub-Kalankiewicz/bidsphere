@@ -1,14 +1,16 @@
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
+import {
+  assertSecretFree,
+  type SepoliaBenchmarkResult,
+} from "./sepolia-benchmark-helpers";
+
 export async function writeBenchmarkCheckpoint(
   outputPath: string,
-  result: unknown,
+  result: SepoliaBenchmarkResult,
   forbiddenValues: readonly string[]
 ): Promise<void> {
-  const { assertSecretFree } = await import(
-    `./sepolia-benchmark-helpers${".ts"}`
-  );
   assertSecretFree(result, forbiddenValues);
   await mkdir(dirname(outputPath), { recursive: true });
   const temporaryPath = `${outputPath}.tmp`;
