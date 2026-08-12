@@ -1,0 +1,7 @@
+{
+  "chainId": 31337,
+  "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "trustedRoots": {
+    "1": "0x921d147c669071b3029bafa7eeeb9c2a234fdd0029aadc8c7038c3794cb7a06b"
+  }
+}

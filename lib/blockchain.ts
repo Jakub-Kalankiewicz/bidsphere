@@ -1,6 +1,7 @@
 import { ethers } from "ethers";
 import { createHash } from "crypto";
 import artifact from "@/lib/contracts/ModelRegistry.json";
+import { resolveContractAddress } from "@/lib/blockchain-config";
 import {
   lookupModelOnChain,
   type ModelRegistryReader,
@@ -8,20 +9,26 @@ import {
 } from "@/lib/blockchain-lookup";
 
 type Artifact = { address: string; abi: ethers.InterfaceAbi };
-const { address, abi } = artifact as Artifact;
+const { address: deploymentAddress, abi } = artifact as Artifact;
 
-function getContract(withSigner = false): ethers.Contract {
+async function getContract(withSigner = false): Promise<ethers.Contract> {
   const provider = new ethers.JsonRpcProvider(process.env.BLOCKCHAIN_RPC_URL!);
+  const network = await provider.getNetwork();
+  const contractAddress = resolveContractAddress(
+    process.env,
+    deploymentAddress,
+    Number(network.chainId)
+  );
 
   if (withSigner) {
     const signer = new ethers.Wallet(
       process.env.BLOCKCHAIN_PRIVATE_KEY!,
       provider
     );
-    return new ethers.Contract(address, abi, signer);
+    return new ethers.Contract(contractAddress, abi, signer);
   }
 
-  return new ethers.Contract(address, abi, provider);
+  return new ethers.Contract(contractAddress, abi, provider);
 }
 
 /**
@@ -50,7 +57,7 @@ export async function registerModelOnChain(
   modelId: string,
   hashHex: string
 ): Promise<string> {
-  const contract = getContract(true);
+  const contract = await getContract(true);
   const tx = await contract.registerModel(modelId, hashHex as `0x${string}`);
   const receipt = await tx.wait();
   return receipt.hash;
@@ -70,7 +77,7 @@ export async function getOnChainData(
 export async function getOnChainDataDetailed(
   modelId: string
 ): Promise<OnChainLookupResult> {
-  const contract = getContract(false) as unknown as ModelRegistryReader;
+  const contract = (await getContract(false)) as unknown as ModelRegistryReader;
   return lookupModelOnChain(modelId, contract);
 }
 
@@ -84,7 +91,7 @@ export async function registerMerkleRootOnChain(
   root: string,
   modelIds: string[]
 ): Promise<string> {
-  const contract = getContract(true);
+  const contract = await getContract(true);
   const tx = await contract.registerMerkleRoot(root as `0x${string}`, modelIds);
   const receipt = await tx.wait();
   return receipt.hash;
@@ -98,7 +105,7 @@ export async function getMerkleRootOnChain(
   batchId: number
 ): Promise<{ root: string; timestamp: number; modelIds: string[] } | null> {
   try {
-    const contract = getContract(false);
+    const contract = await getContract(false);
     const [root, timestamp, modelIds]: [string, bigint, string[]] =
       await contract.getMerkleRoot(batchId);
     return { root, timestamp: Number(timestamp), modelIds };
@@ -115,7 +122,7 @@ export async function getBatchForModelOnChain(
   modelId: string
 ): Promise<number> {
   try {
-    const contract = getContract(false);
+    const contract = await getContract(false);
     const batchId: bigint = await contract.getBatchForModel(modelId);
     return Number(batchId);
   } catch {

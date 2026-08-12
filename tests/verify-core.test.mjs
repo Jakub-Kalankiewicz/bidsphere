@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  getExplorerAddressUrl,
   sha256Hex,
   sha256Pair,
   validateProofBundle,
@@ -11,6 +12,14 @@ import {
 const encoder = new TextEncoder();
 const BAD_HASH = `0x${"ff".repeat(32)}`;
 const CONTRACT_ADDRESS = `0x${"12".repeat(20)}`;
+
+test("builds an explorer link only for a recognized public network", () => {
+  assert.equal(getExplorerAddressUrl(31_337, CONTRACT_ADDRESS), null);
+  assert.equal(
+    getExplorerAddressUrl(11_155_111, CONTRACT_ADDRESS),
+    `https://sepolia.etherscan.io/address/${CONTRACT_ADDRESS.toLowerCase()}`
+  );
+});
 
 async function twoLeafFixture() {
   const fileBytes = encoder.encode("valid GLB fixture");

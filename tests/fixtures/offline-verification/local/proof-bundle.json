@@ -1,0 +1,15 @@
+{
+  "modelId": "000000000000000000000001",
+  "modelName": "Minimalny model testowy GLB",
+  "fileHash": "0x3a9ce551c795625e9bc78a946042de171434218431c195e540bdfa611eefffe6",
+  "batchId": 1,
+  "merkleRoot": "0x921d147c669071b3029bafa7eeeb9c2a234fdd0029aadc8c7038c3794cb7a06b",
+  "merkleProof": [
+    "0xbc2a94fa24e412ea72ab3f195b3ac32d28952832ccdda4a60f614b53603d3cdc"
+  ],
+  "leafIndex": 0,
+  "totalLeaves": 2,
+  "registeredAt": 1786579202,
+  "chainId": 31337,
+  "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3"
+}

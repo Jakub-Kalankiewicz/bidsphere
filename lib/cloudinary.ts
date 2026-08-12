@@ -39,9 +39,9 @@ export function extractPublicIdAndType(url: string): {
 }
 
 /**
- * Generates a signed, time-limited URL for a raw Cloudinary asset.
+ * Generates a signed Cloudinary delivery URL for a raw asset.
  * Automatically detects whether the asset is type="upload" or type="authenticated".
- * The URL expires in 1 hour and includes an HMAC signature validated by Cloudinary.
+ * Access and expiry semantics depend on the asset type and Cloudinary configuration.
  */
 export function signCanvasUrl(publicUrl: string): string {
   const { publicId, type, version } = extractPublicIdAndType(publicUrl);

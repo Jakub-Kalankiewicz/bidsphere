@@ -168,6 +168,13 @@
       });
     }
 
+    function getExplorerAddressUrl(chainId, contractAddress) {
+      if (chainId !== 11_155_111 || !ADDRESS_PATTERN.test(contractAddress)) {
+        return null;
+      }
+      return `https://sepolia.etherscan.io/address/${contractAddress.toLowerCase()}`;
+    }
+
     function hexToBytes(hash) {
       const bytes = new Uint8Array(32);
       for (let index = 0; index < bytes.length; index += 1) {
@@ -240,22 +247,27 @@
 
     // Trust-anchor configuration for a specific experiment. Update it only from
     // an independently authenticated source; a proof bundle is not a trust anchor.
+    /* VERIFIER_CONFIG_START */
+    /* {"chainId":31337,"contractAddress":"0x5fbdb2315678afecb367f032d93f642f64180aa3","trustedRoots":{"1":"0x921d147c669071b3029bafa7eeeb9c2a234fdd0029aadc8c7038c3794cb7a06b"}} */
     const VERIFIER_CONFIG = Object.freeze({
-      chainId: 11155111,
-      contractAddress: "",
-      // Add only roots obtained through an independently authenticated channel.
-      // Example: 1: "0x...64 hexadecimal characters..."
-      trustedRoots: Object.freeze({}),
+      chainId: 31337,
+      contractAddress: "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+      trustedRoots: Object.freeze({"1":"0x921d147c669071b3029bafa7eeeb9c2a234fdd0029aadc8c7038c3794cb7a06b"}),
     });
+    /* VERIFIER_CONFIG_END */
 
     const resultContainer = document.getElementById("result");
     const verifyButton = document.getElementById("verifyBtn");
     let glbFile = null;
     let proofData = null;
 
-    if (/^0x[0-9a-fA-F]{40}$/.test(VERIFIER_CONFIG.contractAddress)) {
+    const explorerAddressUrl = getExplorerAddressUrl(
+      VERIFIER_CONFIG.chainId,
+      VERIFIER_CONFIG.contractAddress
+    );
+    if (explorerAddressUrl) {
       const etherscanLink = document.getElementById("etherscanLink");
-      etherscanLink.href = `https://sepolia.etherscan.io/address/${VERIFIER_CONFIG.contractAddress}`;
+      etherscanLink.href = explorerAddressUrl;
       document.getElementById("contractReference").style.display = "block";
     }
 

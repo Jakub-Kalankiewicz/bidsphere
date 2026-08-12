@@ -99,6 +99,13 @@ export function validateVerifierConfig(value) {
   });
 }
 
+export function getExplorerAddressUrl(chainId, contractAddress) {
+  if (chainId !== 11_155_111 || !ADDRESS_PATTERN.test(contractAddress)) {
+    return null;
+  }
+  return `https://sepolia.etherscan.io/address/${contractAddress.toLowerCase()}`;
+}
+
 function hexToBytes(hash) {
   const bytes = new Uint8Array(32);
   for (let index = 0; index < bytes.length; index += 1) {

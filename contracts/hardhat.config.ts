@@ -7,8 +7,14 @@ dotenv.config({ path: "../.env" });
 const config: HardhatUserConfig = {
   solidity: "0.8.19",
   networks: {
+    hardhat: process.env.BIDSPHERE_FIXTURE_MODE === "1"
+      ? { initialDate: "2026-08-12T23:59:59.000Z" }
+      : {},
     localhost: {
       url: "http://127.0.0.1:8545",
+    },
+    fixture: {
+      url: "http://127.0.0.1:18545",
     },
     sepolia: {
       url: process.env.SEPOLIA_RPC_URL ?? "",

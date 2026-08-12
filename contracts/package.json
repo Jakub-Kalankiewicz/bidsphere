@@ -8,8 +8,12 @@
     "test:gas": "REPORT_GAS=true hardhat test",
     "benchmark:gas": "hardhat run scripts/benchmark-gas.ts --network hardhat",
     "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
+    "deploy:fixture": "hardhat run scripts/deploy.ts --network fixture",
     "deploy:sepolia": "hardhat run scripts/deploy.ts --network sepolia",
-    "node": "hardhat node"
+    "sepolia:preflight": "hardhat run scripts/sepolia-preflight.ts --network sepolia",
+    "sepolia:smoke": "hardhat run scripts/sepolia-smoke.ts --network sepolia",
+    "node": "hardhat node",
+    "node:fixture": "BIDSPHERE_FIXTURE_MODE=1 hardhat node --port 18545"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",

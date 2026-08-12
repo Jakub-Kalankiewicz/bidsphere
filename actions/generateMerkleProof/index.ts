@@ -2,6 +2,7 @@
 
 import { db } from "@/lib/db";
 import { currentUser } from "@/lib/auth";
+import { getBlockchainExperimentConfig } from "@/lib/blockchain-config";
 import { buildMerkleTree, generateProof } from "@/lib/merkle";
 
 export interface ProofBundle {
@@ -23,6 +24,18 @@ export async function generateMerkleProof(
 ): Promise<ProofBundle | { error: string }> {
   const user = await currentUser();
   if (!user) return { error: "Unauthorized" };
+
+  let blockchainConfig;
+  try {
+    blockchainConfig = getBlockchainExperimentConfig();
+  } catch (error) {
+    return {
+      error:
+        error instanceof Error
+          ? `Invalid blockchain experiment configuration: ${error.message}`
+          : "Invalid blockchain experiment configuration",
+    };
+  }
 
   const item = await db.auctionItem.findUnique({
     where: { id: itemId },
@@ -61,7 +74,7 @@ export async function generateMerkleProof(
     leafIndex,
     totalLeaves: batch.modelIds.length,
     registeredAt: Math.floor(batch.createdAt.getTime() / 1000),
-    chainId: 11155111, // Sepolia
-    contractAddress: process.env.BLOCKCHAIN_CONTRACT_ADDRESS ?? "",
+    chainId: blockchainConfig.chainId,
+    contractAddress: blockchainConfig.contractAddress,
   };
 }
