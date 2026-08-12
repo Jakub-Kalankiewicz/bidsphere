@@ -119,6 +119,48 @@ export interface BuildConfirmedTransactionRecordInput {
   receiptMs: number;
 }
 
+export interface SepoliaBenchmarkPreflightReport {
+  status: "passed";
+  transactionSent: false;
+  network: "sepolia";
+  chainId: 11155111;
+  deployerAddress: string;
+  referenceContractAddress: string;
+  referenceBytecodeMatches: true;
+  referenceOwnerMatches: true;
+  operationCount: 68;
+  aggregateGasCeiling: "16500000";
+  maxFeePerGasWei: string;
+  maxPriorityFeePerGasWei: string;
+  balanceWei: string;
+  boundedMaximumCostWei: string;
+  estimatedOperationGasTotal: string;
+  estimatedActualCostWei: string;
+  estimates: {
+    deployment: string;
+    individualRegistration: string;
+    merkleRegistration: string;
+  };
+}
+
+export interface BuildBenchmarkPreflightReportInput {
+  chainId: bigint;
+  deployerAddress: string;
+  referenceContractAddress: string;
+  bytecodeMatches: boolean;
+  ownerMatches: boolean;
+  operationPlan: BenchmarkOperation[];
+  aggregateGasCeiling: bigint;
+  maxFeePerGasWei: bigint;
+  maxPriorityFeePerGasWei: bigint;
+  balanceWei: bigint;
+  estimates: {
+    deployment: bigint;
+    individualRegistration: bigint;
+    merkleRegistration: bigint;
+  };
+}
+
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -207,6 +249,99 @@ export function buildBenchmarkOperationPlan(seriesId: string): BenchmarkOperatio
 
 export function calculateAggregateGasCeiling(plan: BenchmarkOperation[]): bigint {
   return plan.reduce((total, operation) => total + operation.gasLimit, 0n);
+}
+
+function assertBenchmarkEstimateWithinLimit(
+  estimate: bigint,
+  limit: bigint,
+  label: string
+): void {
+  if (estimate <= 0n || estimate > limit) {
+    throw new Error(`${label} estimate exceeds its benchmark gas ceiling`);
+  }
+}
+
+export function buildBenchmarkPreflightReport(
+  input: BuildBenchmarkPreflightReportInput
+): SepoliaBenchmarkPreflightReport {
+  const expectedAggregateGasCeiling = 16_500_000n;
+  if (input.chainId !== 11_155_111n) {
+    throw new Error("The benchmark preflight must run on Sepolia");
+  }
+  if (!input.bytecodeMatches) {
+    throw new Error("Reference contract runtime bytecode does not match the artifact");
+  }
+  if (!input.ownerMatches) {
+    throw new Error("Reference contract owner does not match the benchmark wallet");
+  }
+  if (input.operationPlan.length !== 68) {
+    throw new Error("Benchmark operation plan must contain exactly 68 operations");
+  }
+  if (
+    input.aggregateGasCeiling !== expectedAggregateGasCeiling ||
+    calculateAggregateGasCeiling(input.operationPlan) !== expectedAggregateGasCeiling
+  ) {
+    throw new Error("Benchmark operation plan does not match the fixed aggregate gas ceiling");
+  }
+  if (input.maxFeePerGasWei <= 0n) {
+    throw new Error("A positive maximum fee per gas is required");
+  }
+  if (input.maxPriorityFeePerGasWei < 0n) {
+    throw new Error("Maximum priority fee per gas cannot be negative");
+  }
+  if (input.balanceWei <= 0n) {
+    throw new Error("A positive Sepolia wallet balance is required");
+  }
+
+  assertBenchmarkEstimateWithinLimit(
+    input.estimates.deployment,
+    SEPOLIA_BENCHMARK_GAS_LIMITS.deployment,
+    "Deployment"
+  );
+  assertBenchmarkEstimateWithinLimit(
+    input.estimates.individualRegistration,
+    SEPOLIA_BENCHMARK_GAS_LIMITS.individualRegistration,
+    "Individual registration"
+  );
+  assertBenchmarkEstimateWithinLimit(
+    input.estimates.merkleRegistration,
+    SEPOLIA_BENCHMARK_GAS_LIMITS.merkleRegistration,
+    "Merkle registration"
+  );
+
+  const boundedMaximumCostWei = expectedAggregateGasCeiling * input.maxFeePerGasWei;
+  if (input.balanceWei < boundedMaximumCostWei) {
+    throw new Error("Sepolia wallet balance does not cover the bounded maximum cost");
+  }
+  const estimatedOperationGasTotal =
+    2n * input.estimates.deployment +
+    60n * input.estimates.individualRegistration +
+    6n * input.estimates.merkleRegistration;
+  const report: SepoliaBenchmarkPreflightReport = {
+    status: "passed",
+    transactionSent: false,
+    network: "sepolia",
+    chainId: 11_155_111,
+    deployerAddress: input.deployerAddress,
+    referenceContractAddress: input.referenceContractAddress,
+    referenceBytecodeMatches: true,
+    referenceOwnerMatches: true,
+    operationCount: 68,
+    aggregateGasCeiling: "16500000",
+    maxFeePerGasWei: input.maxFeePerGasWei.toString(),
+    maxPriorityFeePerGasWei: input.maxPriorityFeePerGasWei.toString(),
+    balanceWei: input.balanceWei.toString(),
+    boundedMaximumCostWei: boundedMaximumCostWei.toString(),
+    estimatedOperationGasTotal: estimatedOperationGasTotal.toString(),
+    estimatedActualCostWei: (estimatedOperationGasTotal * input.maxFeePerGasWei).toString(),
+    estimates: {
+      deployment: input.estimates.deployment.toString(),
+      individualRegistration: input.estimates.individualRegistration.toString(),
+      merkleRegistration: input.estimates.merkleRegistration.toString(),
+    },
+  };
+  assertSecretFree(report, []);
+  return report;
 }
 
 export function parseApprovedMaximumWei(value: string | undefined): bigint {

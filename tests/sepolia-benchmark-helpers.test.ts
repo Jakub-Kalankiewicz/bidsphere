@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   assertNextTransactionWithinBudget,
   assertSecretFree,
+  buildBenchmarkPreflightReport,
   buildBenchmarkOperationPlan,
   buildConfirmedTransactionRecord,
   calculateActualFee,
@@ -132,4 +133,72 @@ test("rejects secret-shaped keys and forbidden literal values", () => {
 
 test("accepts a top-level non-serializable value when no secret is present", () => {
   assert.doesNotThrow(() => assertSecretFree(undefined, ["secret"]));
+});
+
+test("builds a secret-free read-only preflight report from public estimates", () => {
+  const report = buildBenchmarkPreflightReport({
+    chainId: 11_155_111n,
+    deployerAddress: "0x1D0a483dE7D587401b72E1B7658198eC840cCf2c",
+    referenceContractAddress: "0x1F14E890e7428322F25Fa6aCfD0A89C045311102",
+    bytecodeMatches: true,
+    ownerMatches: true,
+    operationPlan: buildBenchmarkOperationPlan("series-fixed"),
+    aggregateGasCeiling: 16_500_000n,
+    maxFeePerGasWei: 2_000_000_000n,
+    maxPriorityFeePerGasWei: 1_000_000n,
+    balanceWei: 50_000_000_000_000_000n,
+    estimates: {
+      deployment: 1_241_515n,
+      individualRegistration: 94_309n,
+      merkleRegistration: 255_008n,
+    },
+  });
+
+  assert.deepEqual(report, {
+    status: "passed",
+    transactionSent: false,
+    network: "sepolia",
+    chainId: 11_155_111,
+    deployerAddress: "0x1D0a483dE7D587401b72E1B7658198eC840cCf2c",
+    referenceContractAddress: "0x1F14E890e7428322F25Fa6aCfD0A89C045311102",
+    referenceBytecodeMatches: true,
+    referenceOwnerMatches: true,
+    operationCount: 68,
+    aggregateGasCeiling: "16500000",
+    maxFeePerGasWei: "2000000000",
+    maxPriorityFeePerGasWei: "1000000",
+    balanceWei: "50000000000000000",
+    boundedMaximumCostWei: "33000000000000000",
+    estimatedOperationGasTotal: "9671618",
+    estimatedActualCostWei: "19343236000000000",
+    estimates: {
+      deployment: "1241515",
+      individualRegistration: "94309",
+      merkleRegistration: "255008",
+    },
+  });
+  assert.doesNotThrow(() => assertSecretFree(report, []));
+});
+
+test("rejects a preflight report before serialization when its reference checks fail", () => {
+  const input = {
+    chainId: 11_155_111n,
+    deployerAddress: "0x1D0a483dE7D587401b72E1B7658198eC840cCf2c",
+    referenceContractAddress: "0x1F14E890e7428322F25Fa6aCfD0A89C045311102",
+    bytecodeMatches: true,
+    ownerMatches: true,
+    operationPlan: buildBenchmarkOperationPlan("series-fixed"),
+    aggregateGasCeiling: 16_500_000n,
+    maxFeePerGasWei: 2_000_000_000n,
+    maxPriorityFeePerGasWei: 1_000_000n,
+    balanceWei: 50_000_000_000_000_000n,
+    estimates: {
+      deployment: 1_241_515n,
+      individualRegistration: 94_309n,
+      merkleRegistration: 255_008n,
+    },
+  };
+
+  assert.throws(() => buildBenchmarkPreflightReport({ ...input, bytecodeMatches: false }));
+  assert.throws(() => buildBenchmarkPreflightReport({ ...input, ownerMatches: false }));
 });

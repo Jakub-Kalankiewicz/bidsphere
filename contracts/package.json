@@ -10,6 +10,7 @@
     "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
     "deploy:fixture": "hardhat run scripts/deploy.ts --network fixture",
     "deploy:sepolia": "hardhat run scripts/deploy.ts --network sepolia",
+    "sepolia:benchmark:preflight": "hardhat run scripts/sepolia-benchmark-preflight.ts --network sepolia",
     "sepolia:preflight": "hardhat run scripts/sepolia-preflight.ts --network sepolia",
     "sepolia:smoke": "hardhat run scripts/sepolia-smoke.ts --network sepolia",
     "node": "hardhat node",
