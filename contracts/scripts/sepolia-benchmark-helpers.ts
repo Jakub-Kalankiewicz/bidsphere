@@ -32,6 +32,50 @@ export interface BenchmarkOperation {
   gasLimit: bigint;
 }
 
+export interface BenchmarkTransactionRecord {
+  operationId: string;
+  kind: BenchmarkOperationKind;
+  strategy: BenchmarkStrategy;
+  round: number | null;
+  warmup: boolean;
+  sequenceInRound: number | null;
+  status: "pending" | "confirmed";
+  transactionHash: string;
+  blockNumber: number | null;
+  receiptStatus: number | null;
+  confirmationsRequested: 1;
+  gasEstimate: string;
+  gasLimit: string;
+  gasUsed: string | null;
+  maxFeePerGasWei: string;
+  maxPriorityFeePerGasWei: string;
+  effectiveGasPriceWei: string | null;
+  actualFeeWei: string | null;
+  worstCaseFeeWei: string;
+  submittedAtUtc: string;
+  receiptAtUtc: string | null;
+  submissionMs: number;
+  confirmationMs: number | null;
+  endToEndMs: number | null;
+}
+
+export interface BuildConfirmedTransactionRecordInput {
+  operation: BenchmarkOperation;
+  transactionHash: string;
+  blockNumber: number;
+  receiptStatus: number;
+  gasEstimate: bigint;
+  gasUsed: bigint;
+  maxFeePerGasWei: bigint;
+  maxPriorityFeePerGasWei: bigint;
+  effectiveGasPriceWei: bigint;
+  submittedAtUtc: string;
+  receiptAtUtc: string;
+  startedMs: number;
+  broadcastMs: number;
+  receiptMs: number;
+}
+
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -116,4 +160,116 @@ export function buildBenchmarkOperationPlan(seriesId: string): BenchmarkOperatio
   }
 
   return plan;
+}
+
+export function calculateAggregateGasCeiling(plan: BenchmarkOperation[]): bigint {
+  return plan.reduce((total, operation) => total + operation.gasLimit, 0n);
+}
+
+export function parseApprovedMaximumWei(value: string | undefined): bigint {
+  if (value === undefined || !/^\d+$/.test(value)) {
+    throw new Error("Approved maximum must be digits only");
+  }
+  const parsed = BigInt(value);
+  if (parsed <= 0n) {
+    throw new Error("Approved maximum must be greater than zero");
+  }
+  return parsed;
+}
+
+export function assertNextTransactionWithinBudget(input: {
+  actualSpentWei: bigint;
+  reservedPendingWei: bigint;
+  nextGasLimit: bigint;
+  maxFeePerGasWei: bigint;
+  approvedMaximumWei: bigint;
+}): void {
+  const nextWorstCaseWei = input.nextGasLimit * input.maxFeePerGasWei;
+  if (
+    input.actualSpentWei + input.reservedPendingWei + nextWorstCaseWei >
+    input.approvedMaximumWei
+  ) {
+    throw new Error("Next transaction exceeds the approved maximum cost");
+  }
+}
+
+export function calculateActualFee(gasUsed: bigint, effectiveGasPriceWei: bigint): bigint {
+  return gasUsed * effectiveGasPriceWei;
+}
+
+export function buildConfirmedTransactionRecord(
+  input: BuildConfirmedTransactionRecordInput
+): BenchmarkTransactionRecord {
+  if (input.broadcastMs < input.startedMs || input.receiptMs < input.broadcastMs) {
+    throw new Error("Transaction timings must be monotonic");
+  }
+  const submissionMs = input.broadcastMs - input.startedMs;
+  const confirmationMs = input.receiptMs - input.broadcastMs;
+  const endToEndMs = input.receiptMs - input.startedMs;
+  const actualFeeWei = calculateActualFee(input.gasUsed, input.effectiveGasPriceWei);
+
+  return {
+    operationId: input.operation.operationId,
+    kind: input.operation.kind,
+    strategy: input.operation.strategy,
+    round: input.operation.round,
+    warmup: input.operation.warmup,
+    sequenceInRound: input.operation.sequenceInRound,
+    status: "confirmed",
+    transactionHash: input.transactionHash,
+    blockNumber: input.blockNumber,
+    receiptStatus: input.receiptStatus,
+    confirmationsRequested: 1,
+    gasEstimate: input.gasEstimate.toString(),
+    gasLimit: input.operation.gasLimit.toString(),
+    gasUsed: input.gasUsed.toString(),
+    maxFeePerGasWei: input.maxFeePerGasWei.toString(),
+    maxPriorityFeePerGasWei: input.maxPriorityFeePerGasWei.toString(),
+    effectiveGasPriceWei: input.effectiveGasPriceWei.toString(),
+    actualFeeWei: actualFeeWei.toString(),
+    worstCaseFeeWei: (input.operation.gasLimit * input.maxFeePerGasWei).toString(),
+    submittedAtUtc: input.submittedAtUtc,
+    receiptAtUtc: input.receiptAtUtc,
+    submissionMs,
+    confirmationMs,
+    endToEndMs,
+  };
+}
+
+export function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("receipt timeout")), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      }
+    );
+  });
+}
+
+export function assertSecretFree(value: unknown, forbiddenValues: readonly string[]): void {
+  const forbidden = forbiddenValues.filter((entry) => entry.length > 0);
+  const serialized = JSON.stringify(value);
+  if (forbidden.some((entry) => serialized.includes(entry))) {
+    throw new Error("Secret value found");
+  }
+
+  const visit = (candidate: unknown): void => {
+    if (Array.isArray(candidate)) {
+      candidate.forEach(visit);
+    } else if (candidate !== null && typeof candidate === "object") {
+      for (const [key, child] of Object.entries(candidate)) {
+        if (/private.?key|rpc.?url|BLOCKCHAIN_PRIVATE_KEY|SEPOLIA_RPC_URL/i.test(key)) {
+          throw new Error("Secret-shaped key found");
+        }
+        visit(child);
+      }
+    }
+  };
+  visit(value);
 }
