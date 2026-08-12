@@ -202,3 +202,36 @@ test("rejects a preflight report before serialization when its reference checks 
   assert.throws(() => buildBenchmarkPreflightReport({ ...input, bytecodeMatches: false }));
   assert.throws(() => buildBenchmarkPreflightReport({ ...input, ownerMatches: false }));
 });
+
+test("rejects a plan whose composition differs despite its 68 operations and gas ceiling", () => {
+  const operationPlan = buildBenchmarkOperationPlan("series-fixed");
+  operationPlan[0] = {
+    ...operationPlan[0],
+    kind: "individual-registration",
+    strategy: "individual",
+  };
+  assert.equal(operationPlan.length, 68);
+  assert.equal(calculateAggregateGasCeiling(operationPlan), 16_500_000n);
+
+  assert.throws(
+    () =>
+      buildBenchmarkPreflightReport({
+        chainId: 11_155_111n,
+        deployerAddress: "0x1D0a483dE7D587401b72E1B7658198eC840cCf2c",
+        referenceContractAddress: "0x1F14E890e7428322F25Fa6aCfD0A89C045311102",
+        bytecodeMatches: true,
+        ownerMatches: true,
+        operationPlan,
+        aggregateGasCeiling: 16_500_000n,
+        maxFeePerGasWei: 2_000_000_000n,
+        maxPriorityFeePerGasWei: 1_000_000n,
+        balanceWei: 50_000_000_000_000_000n,
+        estimates: {
+          deployment: 1_241_515n,
+          individualRegistration: 94_309n,
+          merkleRegistration: 255_008n,
+        },
+      }),
+    /composition/
+  );
+});

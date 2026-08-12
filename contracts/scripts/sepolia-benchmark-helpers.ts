@@ -261,6 +261,40 @@ function assertBenchmarkEstimateWithinLimit(
   }
 }
 
+function assertBenchmarkOperationComposition(plan: BenchmarkOperation[]): void {
+  const expectedComposition: Array<{
+    kind: BenchmarkOperationKind;
+    count: number;
+    gasLimit: bigint;
+  }> = [
+    {
+      kind: "deployment",
+      count: 2,
+      gasLimit: SEPOLIA_BENCHMARK_GAS_LIMITS.deployment,
+    },
+    {
+      kind: "individual-registration",
+      count: 60,
+      gasLimit: SEPOLIA_BENCHMARK_GAS_LIMITS.individualRegistration,
+    },
+    {
+      kind: "merkle-registration",
+      count: 6,
+      gasLimit: SEPOLIA_BENCHMARK_GAS_LIMITS.merkleRegistration,
+    },
+  ];
+
+  for (const { kind, count, gasLimit } of expectedComposition) {
+    const operations = plan.filter((operation) => operation.kind === kind);
+    if (
+      operations.length !== count ||
+      operations.some((operation) => operation.gasLimit !== gasLimit)
+    ) {
+      throw new Error("Benchmark operation plan does not match the required composition");
+    }
+  }
+}
+
 export function buildBenchmarkPreflightReport(
   input: BuildBenchmarkPreflightReportInput
 ): SepoliaBenchmarkPreflightReport {
@@ -277,6 +311,7 @@ export function buildBenchmarkPreflightReport(
   if (input.operationPlan.length !== 68) {
     throw new Error("Benchmark operation plan must contain exactly 68 operations");
   }
+  assertBenchmarkOperationComposition(input.operationPlan);
   if (
     input.aggregateGasCeiling !== expectedAggregateGasCeiling ||
     calculateAggregateGasCeiling(input.operationPlan) !== expectedAggregateGasCeiling
