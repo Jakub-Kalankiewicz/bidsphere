@@ -5,8 +5,10 @@ import { resolve } from "node:path";
 import { ethers, network } from "hardhat";
 import type {
   ContractFactory,
+  Signer,
   TransactionReceipt,
   TransactionRequest,
+  TransactionResponse,
 } from "ethers";
 
 import { writeBenchmarkCheckpoint } from "./sepolia-benchmark-checkpoint";
@@ -42,10 +44,43 @@ interface PreparedOperation {
   transactionRequest: TransactionRequest;
 }
 
-interface TransactionFeeOverrides {
-  gasLimit: bigint;
-  maxFeePerGas: bigint;
-  maxPriorityFeePerGas: bigint;
+export interface PaidBenchmarkPreparedOperation {
+  gasEstimate: bigint;
+  transactionRequest: TransactionRequest;
+}
+
+export interface PaidBenchmarkReceipt {
+  blockNumber: number;
+  status: number | null;
+  gasUsed: bigint;
+  gasPrice: bigint;
+  contractAddress: string | null;
+}
+
+export interface PaidBenchmarkCoreDependencies<Response extends { hash: string }> {
+  monotonicNow: () => number;
+  utcNow: () => string;
+  getFeeData: () => Promise<{
+    maxFeePerGasWei: bigint | null;
+    maxPriorityFeePerGasWei: bigint;
+  }>;
+  getBalance: (address: string) => Promise<bigint>;
+  prepareOperation: (
+    operation: BenchmarkOperation,
+    addresses: { individual: string | null; merkle: string | null }
+  ) => Promise<PaidBenchmarkPreparedOperation>;
+  populateTransaction: (request: TransactionRequest) => Promise<TransactionRequest>;
+  signer: Pick<Signer, "signTransaction">;
+  provider: { broadcastTransaction(signedTransaction: string): Promise<Response> };
+  waitForReceipt: (response: Response) => Promise<PaidBenchmarkReceipt | null>;
+  checkpoint: (result: SepoliaBenchmarkResult) => Promise<void>;
+}
+
+export interface PaidBenchmarkCoreInput {
+  operations: readonly BenchmarkOperation[];
+  initialResult: SepoliaBenchmarkResult;
+  approvedMaximumWei: bigint;
+  deployerAddress: string;
 }
 
 function benchmarkProviderLabel(value: string | undefined): string | null {
@@ -175,6 +210,225 @@ async function prepareOperation(
   };
 }
 
+export async function runPaidBenchmarkCore<Response extends { hash: string }>(
+  input: PaidBenchmarkCoreInput,
+  dependencies: PaidBenchmarkCoreDependencies<Response>
+): Promise<SepoliaBenchmarkResult> {
+  const canonicalOperations = buildBenchmarkOperationPlan(
+    input.initialResult.seriesId
+  );
+  if (
+    input.operations.length !== 68 ||
+    input.initialResult.plannedOperations.length !== 68 ||
+    input.operations.some(
+      (operation, index) => {
+        const canonical = canonicalOperations[index];
+        const planned = input.initialResult.plannedOperations[index];
+        return (
+          operation.operationId !== canonical.operationId ||
+          operation.kind !== canonical.kind ||
+          operation.strategy !== canonical.strategy ||
+          operation.round !== canonical.round ||
+          operation.warmup !== canonical.warmup ||
+          operation.sequenceInRound !== canonical.sequenceInRound ||
+          operation.merkleRoot !== canonical.merkleRoot ||
+          operation.gasLimit !== canonical.gasLimit ||
+          operation.modelIds.length !== canonical.modelIds.length ||
+          operation.modelIds.some(
+            (modelId, modelIndex) =>
+              modelId !== canonical.modelIds[modelIndex]
+          ) ||
+          planned.operationId !== canonical.operationId ||
+          planned.kind !== canonical.kind ||
+          planned.strategy !== canonical.strategy ||
+          planned.round !== canonical.round ||
+          planned.warmup !== canonical.warmup ||
+          planned.sequenceInRound !== canonical.sequenceInRound ||
+          planned.merkleRoot !== canonical.merkleRoot ||
+          planned.gasLimit !== canonical.gasLimit.toString() ||
+          planned.modelIds.length !== canonical.modelIds.length ||
+          planned.modelIds.some(
+            (modelId, modelIndex) =>
+              modelId !== canonical.modelIds[modelIndex]
+          )
+        );
+      }
+    )
+  ) {
+    throw new Error("Paid benchmark operations do not match the initial canonical plan");
+  }
+
+  let result = input.initialResult;
+  let individualContractAddress = result.contractAddresses.individual;
+  let merkleContractAddress = result.contractAddresses.merkle;
+  const seriesMonotonicOriginMs = dependencies.monotonicNow();
+  await dependencies.checkpoint(result);
+
+  for (const operation of input.operations) {
+    const feeData = await dependencies.getFeeData();
+    const maxFeePerGasWei = feeData.maxFeePerGasWei;
+    if (!maxFeePerGasWei || maxFeePerGasWei <= 0n) {
+      throw new Error("RPC did not return a usable maximum fee per gas");
+    }
+    const maxPriorityFeePerGasWei = feeData.maxPriorityFeePerGasWei;
+    if (maxPriorityFeePerGasWei < 0n) {
+      throw new Error("RPC returned a negative maximum priority fee per gas");
+    }
+
+    const prepared = await dependencies.prepareOperation(operation, {
+      individual: individualContractAddress,
+      merkle: merkleContractAddress,
+    });
+    assertGasEstimateWithinLimit(
+      prepared.gasEstimate,
+      operation.gasLimit,
+      operation.operationId
+    );
+    assertNextTransactionWithinBudget({
+      actualSpentWei: BigInt(result.totalActualFeeWei),
+      reservedPendingWei: calculateReservedPendingWei(result.transactions),
+      nextGasLimit: operation.gasLimit,
+      maxFeePerGasWei,
+      approvedMaximumWei: input.approvedMaximumWei,
+    });
+    const nextWorstCaseWei = operation.gasLimit * maxFeePerGasWei;
+    if ((await dependencies.getBalance(input.deployerAddress)) < nextWorstCaseWei) {
+      throw new Error("Sepolia wallet balance does not cover the next transaction");
+    }
+
+    const startedOffsetMs =
+      dependencies.monotonicNow() - seriesMonotonicOriginMs;
+    const submittedAtUtc = dependencies.utcNow();
+    const populatedTransaction = await dependencies.populateTransaction({
+      ...prepared.transactionRequest,
+      gasLimit: operation.gasLimit,
+      maxFeePerGas: maxFeePerGasWei,
+      maxPriorityFeePerGas: maxPriorityFeePerGasWei,
+    });
+    let pending: BenchmarkTransactionRecord | null = null;
+    let broadcastOffsetMs: number | null = null;
+    let broadcastAtUtc: string | null = null;
+    const broadcast = await persistThenBroadcastTransaction({
+      populatedTransaction,
+      signer: dependencies.signer,
+      provider: dependencies.provider,
+      worstCaseFeeWei: nextWorstCaseWei,
+      persistIntent: async (intent) => {
+        if (intent.worstCaseFeeWei !== nextWorstCaseWei) {
+          throw new Error("Pre-broadcast reservation does not match the budget gate");
+        }
+        pending = buildPreBroadcastTransactionRecord({
+          operation,
+          transactionHash: intent.transactionHash,
+          nonce: intent.nonce,
+          gasEstimate: prepared.gasEstimate,
+          maxFeePerGasWei,
+          maxPriorityFeePerGasWei,
+          submittedAtUtc,
+          startedOffsetMs,
+        });
+        result = {
+          ...result,
+          transactions: [...result.transactions, pending],
+          reservedPendingWei: calculateReservedPendingWei([
+            ...result.transactions,
+            pending,
+          ]).toString(),
+        };
+        await dependencies.checkpoint(result);
+      },
+      persistAcknowledgement: async (_response, intent) => {
+        if (!pending || pending.transactionHash !== intent.transactionHash) {
+          throw new Error("Broadcast acknowledgement has no matching intent");
+        }
+        broadcastOffsetMs =
+          dependencies.monotonicNow() - seriesMonotonicOriginMs;
+        broadcastAtUtc = dependencies.utcNow();
+        pending = acknowledgeTransactionBroadcast(pending, {
+          broadcastAtUtc,
+          broadcastOffsetMs,
+        });
+        result = {
+          ...result,
+          transactions: result.transactions.map((record) =>
+            record.operationId === operation.operationId ? pending! : record
+          ),
+        };
+        await dependencies.checkpoint(result);
+      },
+    });
+    if (!pending || broadcastOffsetMs === null || broadcastAtUtc === null) {
+      throw new Error("Broadcast acknowledgement is incomplete");
+    }
+    const acknowledgedPending = result.transactions.find(
+      (record) => record.operationId === operation.operationId
+    );
+    if (!acknowledgedPending?.broadcastAcknowledged) {
+      throw new Error("Broadcast acknowledgement is incomplete");
+    }
+
+    const receipt = await dependencies.waitForReceipt(broadcast);
+    if (!receipt) throw new Error("Transaction receipt is unavailable");
+    const receiptOffsetMs =
+      dependencies.monotonicNow() - seriesMonotonicOriginMs;
+    const receiptAtUtc = dependencies.utcNow();
+    const confirmed = buildConfirmedTransactionRecord({
+      operation,
+      transactionHash: broadcast.hash,
+      nonce: acknowledgedPending.nonce,
+      blockNumber: receipt.blockNumber,
+      receiptStatus: receipt.status ?? 0,
+      gasEstimate: prepared.gasEstimate,
+      gasUsed: receipt.gasUsed,
+      maxFeePerGasWei,
+      maxPriorityFeePerGasWei,
+      effectiveGasPriceWei: receipt.gasPrice,
+      submittedAtUtc,
+      broadcastAtUtc,
+      receiptAtUtc,
+      startedOffsetMs,
+      broadcastOffsetMs,
+      receiptOffsetMs,
+    });
+    result = updateRunningResultAfterReceipt(result, confirmed);
+    if (confirmed.receiptStatus === 1 && operation.kind === "deployment") {
+      if (!receipt.contractAddress) {
+        throw new Error("Deployment receipt did not return an address");
+      }
+      if (operation.strategy === "individual") {
+        individualContractAddress = receipt.contractAddress;
+        result = {
+          ...result,
+          contractAddresses: {
+            ...result.contractAddresses,
+            individual: receipt.contractAddress,
+          },
+        };
+      } else {
+        merkleContractAddress = receipt.contractAddress;
+        result = {
+          ...result,
+          contractAddresses: {
+            ...result.contractAddresses,
+            merkle: receipt.contractAddress,
+          },
+        };
+      }
+    }
+    await dependencies.checkpoint(result);
+    if (confirmed.receiptStatus !== 1) {
+      throw new Error(`Transaction ${operation.operationId} did not succeed`);
+    }
+  }
+
+  result = completeBenchmarkResult(
+    result,
+    await dependencies.getBalance(input.deployerAddress)
+  );
+  await dependencies.checkpoint(result);
+  return result;
+}
+
 async function main(): Promise<void> {
   const forbiddenValues = [
     process.env.SEPOLIA_RPC_URL ?? "",
@@ -217,7 +471,6 @@ async function main(): Promise<void> {
       process.env.SEPOLIA_BENCHMARK_RPC_PROVIDER_LABEL
     );
     const startedAtUtc = new Date().toISOString();
-    const seriesMonotonicOriginMs = performance.now();
     const seriesId = createBenchmarkSeriesId(new Date(startedAtUtc));
     const operations = buildBenchmarkOperationPlan(seriesId);
     const balanceBeforeWei = await ethers.provider.getBalance(deployer.address);
@@ -242,194 +495,58 @@ async function main(): Promise<void> {
       },
       operations
     );
-    await writeBenchmarkCheckpoint(outputPath, result, forbiddenValues);
-
     const factory = await ethers.getContractFactory("ModelRegistry", deployer);
-    let individualContractAddress: string | null = null;
-    let merkleContractAddress: string | null = null;
-
-    for (const operation of operations) {
-      const feeData = await ethers.provider.getFeeData();
-      const maxFeePerGasWei = feeData.maxFeePerGas ?? feeData.gasPrice;
-      if (!maxFeePerGasWei || maxFeePerGasWei <= 0n) {
-        throw new Error("RPC did not return a usable maximum fee per gas");
-      }
-      const maxPriorityFeePerGasWei = feeData.maxPriorityFeePerGas ?? 0n;
-      if (maxPriorityFeePerGasWei < 0n) {
-        throw new Error("RPC returned a negative maximum priority fee per gas");
-      }
-
-      const prepared = await prepareOperation(
-        operation,
-        factory,
-        deployer.address,
-        individualContractAddress,
-        merkleContractAddress
-      );
-      assertGasEstimateWithinLimit(
-        prepared.gasEstimate,
-        operation.gasLimit,
-        operation.operationId
-      );
-      assertNextTransactionWithinBudget({
-        actualSpentWei: BigInt(result.totalActualFeeWei),
-        reservedPendingWei: calculateReservedPendingWei(result.transactions),
-        nextGasLimit: operation.gasLimit,
-        maxFeePerGasWei,
+    result = await runPaidBenchmarkCore(
+      {
+        operations,
+        initialResult: result,
         approvedMaximumWei,
-      });
-      const nextWorstCaseWei = operation.gasLimit * maxFeePerGasWei;
-      const currentBalanceWei = await ethers.provider.getBalance(deployer.address);
-      if (currentBalanceWei < nextWorstCaseWei) {
-        throw new Error("Sepolia wallet balance does not cover the next transaction");
-      }
-
-      const overrides: TransactionFeeOverrides = {
-        gasLimit: operation.gasLimit,
-        maxFeePerGas: maxFeePerGasWei,
-        maxPriorityFeePerGas: maxPriorityFeePerGasWei,
-      };
-      const startedOffsetMs = performance.now() - seriesMonotonicOriginMs;
-      const submittedAtUtc = new Date().toISOString();
-      const populatedTransaction = await deployer.populateTransaction({
-        ...prepared.transactionRequest,
-        ...overrides,
-      });
-      let pending: BenchmarkTransactionRecord | null = null;
-      let broadcastOffsetMs: number | null = null;
-      let broadcastAtUtc: string | null = null;
-      const broadcast = await persistThenBroadcastTransaction({
-        populatedTransaction,
+        deployerAddress: deployer.address,
+      },
+      {
+        monotonicNow: () => performance.now(),
+        utcNow: () => new Date().toISOString(),
+        getFeeData: async () => {
+          const feeData = await ethers.provider.getFeeData();
+          return {
+            maxFeePerGasWei: feeData.maxFeePerGas ?? feeData.gasPrice,
+            maxPriorityFeePerGasWei: feeData.maxPriorityFeePerGas ?? 0n,
+          };
+        },
+        getBalance: (address) => ethers.provider.getBalance(address),
+        prepareOperation: (operation, addresses) =>
+          prepareOperation(
+            operation,
+            factory,
+            deployer.address,
+            addresses.individual,
+            addresses.merkle
+          ),
+        populateTransaction: (request) => deployer.populateTransaction(request),
         signer: deployer,
         provider: ethers.provider,
-        worstCaseFeeWei: nextWorstCaseWei,
-        persistIntent: async (intent) => {
-          if (intent.worstCaseFeeWei !== nextWorstCaseWei) {
-            throw new Error("Pre-broadcast reservation does not match the budget gate");
-          }
-          pending = buildPreBroadcastTransactionRecord({
-            operation,
-            transactionHash: intent.transactionHash,
-            nonce: intent.nonce,
-            gasEstimate: prepared.gasEstimate,
-            maxFeePerGasWei,
-            maxPriorityFeePerGasWei,
-            submittedAtUtc,
-            startedOffsetMs,
-          });
-          const checkpointResult = result as SepoliaBenchmarkResult;
-          result = {
-            ...checkpointResult,
-            transactions: [...checkpointResult.transactions, pending],
-            reservedPendingWei: calculateReservedPendingWei([
-              ...checkpointResult.transactions,
-              pending,
-            ]).toString(),
-          };
-          await writeBenchmarkCheckpoint(
-            outputPath!,
-            result as SepoliaBenchmarkResult,
-            forbiddenValues
-          );
-        },
-        persistAcknowledgement: async (_response, intent) => {
-          if (!pending || pending.transactionHash !== intent.transactionHash) {
-            throw new Error("Broadcast acknowledgement has no matching intent");
-          }
-          broadcastOffsetMs = performance.now() - seriesMonotonicOriginMs;
-          broadcastAtUtc = new Date().toISOString();
-          pending = acknowledgeTransactionBroadcast(pending, {
-            broadcastAtUtc,
-            broadcastOffsetMs,
-          });
-          const checkpointResult = result as SepoliaBenchmarkResult;
-          result = {
-            ...checkpointResult,
-            transactions: checkpointResult.transactions.map((record) =>
-              record.operationId === operation.operationId ? pending! : record
+        waitForReceipt: (broadcast: TransactionResponse) =>
+          withTimeout(
+            broadcast.wait(SEPOLIA_BENCHMARK_CONFIG.receiptConfirmations).then(
+              (receipt) => receipt,
+              (waitError: unknown) =>
+                recoverSameHashStatusZeroReceipt<TransactionReceipt>(
+                  waitError,
+                  broadcast.hash
+                )
             ),
-          };
+            SEPOLIA_BENCHMARK_CONFIG.receiptTimeoutMs
+          ),
+        checkpoint: async (checkpointResult) => {
+          result = checkpointResult;
           await writeBenchmarkCheckpoint(
             outputPath!,
-            result as SepoliaBenchmarkResult,
+            checkpointResult,
             forbiddenValues
           );
         },
-      });
-      if (!pending || broadcastOffsetMs === null || broadcastAtUtc === null) {
-        throw new Error("Broadcast acknowledgement is incomplete");
       }
-      const acknowledgedPending = (
-        result as SepoliaBenchmarkResult
-      ).transactions.find(
-        (record) => record.operationId === operation.operationId
-      );
-      if (!acknowledgedPending?.broadcastAcknowledged) {
-        throw new Error("Broadcast acknowledgement is incomplete");
-      }
-
-      const receipt = await withTimeout(
-        broadcast
-          .wait(SEPOLIA_BENCHMARK_CONFIG.receiptConfirmations)
-          .then(
-            (confirmedReceipt) => confirmedReceipt,
-            (waitError: unknown) => {
-              return recoverSameHashStatusZeroReceipt<TransactionReceipt>(
-                waitError,
-                broadcast.hash
-              );
-            }
-          ),
-        SEPOLIA_BENCHMARK_CONFIG.receiptTimeoutMs
-      );
-      if (!receipt) throw new Error("Transaction receipt is unavailable");
-      const receiptOffsetMs = performance.now() - seriesMonotonicOriginMs;
-      const receiptAtUtc = new Date().toISOString();
-      const confirmed = buildConfirmedTransactionRecord({
-        operation,
-        transactionHash: broadcast.hash,
-        nonce: acknowledgedPending.nonce,
-        blockNumber: receipt.blockNumber,
-        receiptStatus: receipt.status ?? 0,
-        gasEstimate: prepared.gasEstimate,
-        gasUsed: receipt.gasUsed,
-        maxFeePerGasWei,
-        maxPriorityFeePerGasWei,
-        effectiveGasPriceWei: receipt.gasPrice,
-        submittedAtUtc,
-        broadcastAtUtc,
-        receiptAtUtc,
-        startedOffsetMs,
-        broadcastOffsetMs,
-        receiptOffsetMs,
-      });
-      result = updateRunningResultAfterReceipt(result, confirmed);
-      if (confirmed.receiptStatus === 1 && operation.kind === "deployment") {
-        const address = receipt.contractAddress;
-        if (!address) throw new Error("Deployment receipt did not return an address");
-        if (operation.strategy === "individual") {
-          individualContractAddress = address;
-          result = {
-            ...result,
-            contractAddresses: { ...result.contractAddresses, individual: address },
-          };
-        } else {
-          merkleContractAddress = address;
-          result = {
-            ...result,
-            contractAddresses: { ...result.contractAddresses, merkle: address },
-          };
-        }
-      }
-      await writeBenchmarkCheckpoint(outputPath, result, forbiddenValues);
-      if (confirmed.receiptStatus !== 1) {
-        throw new Error(`Transaction ${operation.operationId} did not succeed`);
-      }
-    }
-
-    const balanceAfterWei = await ethers.provider.getBalance(deployer.address);
-    result = completeBenchmarkResult(result, balanceAfterWei);
-    await writeBenchmarkCheckpoint(outputPath, result, forbiddenValues);
+    );
     console.log(
       JSON.stringify(
         {
@@ -468,4 +585,6 @@ async function main(): Promise<void> {
   }
 }
 
-void main();
+if (require.main === module) {
+  void main();
+}
