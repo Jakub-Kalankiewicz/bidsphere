@@ -9,82 +9,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   analyzeMatchedBenchmark,
-  analyzeSepoliaBenchmark,
   compareRelevantContractSource,
-  parseLocalBatchTenCsv,
   summarizeFive,
   validateCompletedMatchedHardhatResult,
   validateCompletedSepoliaResult,
 } from "../scripts/analyze-sepolia-benchmark.mjs";
+import * as analyzerModule from "../scripts/analyze-sepolia-benchmark.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const analyzerPath = join(repositoryRoot, "scripts", "analyze-sepolia-benchmark.mjs");
-
-const LOCAL_CSV = `timestamp,commit,network,batch_size,repetition,individual_total_gas,merkle_batch_gas,individual_gas_per_model,merkle_gas_per_model,model_id_length
-2026-01-01T00:00:01Z,local-commit,hardhat,10,1,942101,587601,94210.1,58760.1,24
-2026-01-01T00:00:02Z,local-commit,hardhat,10,2,942102,587602,94210.2,58760.2,24
-2026-01-01T00:00:03Z,local-commit,hardhat,10,3,942103,587603,94210.3,58760.3,24
-2026-01-01T00:00:04Z,local-commit,hardhat,10,4,942104,587604,94210.4,58760.4,24
-2026-01-01T00:00:05Z,local-commit,hardhat,10,5,942105,587605,94210.5,58760.5,24
-2026-01-01T00:00:06Z,local-commit,hardhat,10,6,942106,587606,94210.6,58760.6,24
-2026-01-01T00:00:07Z,local-commit,hardhat,10,7,942107,587607,94210.7,58760.7,24
-2026-01-01T00:00:08Z,local-commit,hardhat,10,8,942108,587608,94210.8,58760.8,24
-2026-01-01T00:00:09Z,local-commit,hardhat,10,9,942109,587609,94210.9,58760.9,24
-2026-01-01T00:00:10Z,local-commit,hardhat,10,10,942110,587610,94211,58761,24
-2026-01-01T00:00:11Z,local-commit,hardhat,10,11,942111,587611,94211.1,58761.1,24
-2026-01-01T00:00:12Z,local-commit,hardhat,10,12,942112,587612,94211.2,58761.2,24
-2026-01-01T00:00:13Z,local-commit,hardhat,10,13,942113,587613,94211.3,58761.3,24
-2026-01-01T00:00:14Z,local-commit,hardhat,10,14,942114,587614,94211.4,58761.4,24
-2026-01-01T00:00:15Z,local-commit,hardhat,10,15,942130,587661,94213,58766.1,24
-2026-01-01T00:00:16Z,local-commit,hardhat,10,16,942130,587661,94213,58766.1,24
-2026-01-01T00:00:17Z,local-commit,hardhat,10,17,942147,587708,94214.7,58770.8,24
-2026-01-01T00:00:18Z,local-commit,hardhat,10,18,942148,587709,94214.8,58770.9,24
-2026-01-01T00:00:19Z,local-commit,hardhat,10,19,942149,587710,94214.9,58771,24
-2026-01-01T00:00:20Z,local-commit,hardhat,10,20,942150,587711,94215,58771.1,24
-2026-01-01T00:00:21Z,local-commit,hardhat,10,21,942151,587712,94215.1,58771.2,24
-2026-01-01T00:00:22Z,local-commit,hardhat,10,22,942152,587713,94215.2,58771.3,24
-2026-01-01T00:00:23Z,local-commit,hardhat,10,23,942153,587714,94215.3,58771.4,24
-2026-01-01T00:00:24Z,local-commit,hardhat,10,24,942154,587715,94215.4,58771.5,24
-2026-01-01T00:00:25Z,local-commit,hardhat,10,25,942155,587716,94215.5,58771.6,24
-2026-01-01T00:00:26Z,local-commit,hardhat,10,26,942156,587717,94215.6,58771.7,24
-2026-01-01T00:00:27Z,local-commit,hardhat,10,27,942157,587718,94215.7,58771.8,24
-2026-01-01T00:00:28Z,local-commit,hardhat,10,28,942158,587719,94215.8,58771.9,24
-2026-01-01T00:00:29Z,local-commit,hardhat,10,29,942159,587720,94215.9,58772,24
-2026-01-01T00:00:30Z,local-commit,hardhat,10,30,942160,587721,94216,58772.1,24
-2026-01-01T00:00:31Z,ignored,hardhat,5,1,1,1,0.2,0.2,24
-2026-01-01T00:00:32Z,ignored,sepolia,10,1,1,1,0.1,0.1,24`;
-
-const UNREPRESENTABLE_HALF_MEDIAN_CSV = `commit,network,batch_size,individual_total_gas,merkle_batch_gas
-edge-commit,hardhat,10,1,1
-edge-commit,hardhat,10,2,2
-edge-commit,hardhat,10,3,3
-edge-commit,hardhat,10,4,4
-edge-commit,hardhat,10,5,5
-edge-commit,hardhat,10,6,6
-edge-commit,hardhat,10,7,7
-edge-commit,hardhat,10,8,8
-edge-commit,hardhat,10,9,9
-edge-commit,hardhat,10,10,10
-edge-commit,hardhat,10,11,11
-edge-commit,hardhat,10,12,12
-edge-commit,hardhat,10,13,13
-edge-commit,hardhat,10,14,14
-edge-commit,hardhat,10,9007199254740990,9007199254740990
-edge-commit,hardhat,10,9007199254740991,9007199254740991
-edge-commit,hardhat,10,9007199254740991,9007199254740991
-edge-commit,hardhat,10,9007199254740991,9007199254740991
-edge-commit,hardhat,10,9007199254740991,9007199254740991
-edge-commit,hardhat,10,9007199254740991,9007199254740991
-edge-commit,hardhat,10,9007199254740991,9007199254740991
-edge-commit,hardhat,10,9007199254740991,9007199254740991
-edge-commit,hardhat,10,9007199254740991,9007199254740991
-edge-commit,hardhat,10,9007199254740991,9007199254740991
-edge-commit,hardhat,10,9007199254740991,9007199254740991
-edge-commit,hardhat,10,9007199254740991,9007199254740991
-edge-commit,hardhat,10,9007199254740991,9007199254740991
-edge-commit,hardhat,10,9007199254740991,9007199254740991
-edge-commit,hardhat,10,9007199254740991,9007199254740991
-edge-commit,hardhat,10,9007199254740991,9007199254740991`;
 
 const INDIVIDUAL_ROUND_GAS = [900000, 940000, 942130, 950000, 930000, 945000];
 const MERKLE_ROUND_GAS = [600000, 580000, 587661, 590000, 570000, 600000];
@@ -346,6 +279,14 @@ test("validates the matched long-lived topology and emits exact five-observation
     median: "942130",
     max: "950000",
   });
+  assert.deepEqual(summary.individual.gasPerModel.observations, ["94000", "94213", "95000", "93000", "94500"]);
+  assert.deepEqual(summary.individual.gasPerModel.statistics, {
+    count: 5,
+    min: "93000",
+    median: "94213",
+    max: "95000",
+  });
+  assert.deepEqual(summary.merkle.gasPerModel.observations, ["58000", "58766.1", "59000", "57000", "60000"]);
   assert.deepEqual(summary.merkle.actualFeeWei.observations, ["1160000", "1175322", "1180000", "1140000", "1200000"]);
   assert.deepEqual(summary.merkle.actualFeeEth.observations, [
     "0.00000000000116",
@@ -358,6 +299,11 @@ test("validates the matched long-lived topology and emits exact five-observation
   assert.equal(Object.hasOwn(summary, "localSource"), false);
   assert.equal(JSON.stringify(summary).includes(codeVersion), false);
   assert.equal(JSON.stringify(summary).includes("p95"), false);
+});
+
+test("does not export the obsolete legacy CSV cross-environment analyzer", () => {
+  assert.equal(Object.hasOwn(analyzerModule, "analyzeSepoliaBenchmark"), false);
+  assert.equal(Object.hasOwn(analyzerModule, "parseLocalBatchTenCsv"), false);
 });
 
 test("rejects non-matched local evidence, broken counters, and code-version mismatch", () => {
@@ -424,72 +370,6 @@ test("summarizes exactly five observations without p95", () => {
   assert.equal(Object.hasOwn(summary, "p95"), false);
   assert.throws(() => summarizeFive([1, 2, 3, 4]), /exactly five/);
   assert.throws(() => summarizeFive([1, 2, 3, 4, 5, 6]), /exactly five/);
-});
-
-test("parses exactly thirty local Hardhat batch-ten rows by header name", () => {
-  assert.deepEqual(parseLocalBatchTenCsv(LOCAL_CSV), {
-    network: "hardhat",
-    batchSize: 10,
-    rows: 30,
-    codeVersion: "local-commit",
-    individualTotalGasMedian: 942130,
-    merkleBatchGasMedian: 587661,
-  });
-  assert.throws(() => parseLocalBatchTenCsv(LOCAL_CSV.replace("hardhat,10,30", "hardhat,5,30")), /exactly 30/);
-});
-
-test("rejects an exact half-integer CSV median that Number cannot represent", () => {
-  assert.throws(
-    () => parseLocalBatchTenCsv(UNREPRESENTABLE_HALF_MEDIAN_CSV),
-    /median.*exactly represented|exactly represent.*median/i
-  );
-});
-
-test("returns an exactly representable half-integer CSV median as a number", () => {
-  const representable = parseLocalBatchTenCsv(
-    UNREPRESENTABLE_HALF_MEDIAN_CSV
-      .replaceAll("9007199254740990", "100")
-      .replaceAll("9007199254740991", "101")
-  );
-  assert.equal(representable.individualTotalGasMedian, 100.5);
-  assert.equal(representable.merkleBatchGasMedian, 100.5);
-});
-
-test("validates raw arithmetic and excludes the warm-up from five-value summaries", () => {
-  const raw = createCompletedRaw();
-  const localReference = parseLocalBatchTenCsv(LOCAL_CSV);
-  const sourceComparison = {
-    codeVersionIdentifiersMatch: false,
-    modelRegistrySourceUnchanged: true,
-    bytecodeIdentityClaimed: false,
-  };
-
-  assert.doesNotThrow(() => validateCompletedSepoliaResult(raw));
-  const summary = analyzeSepoliaBenchmark(raw, localReference, sourceComparison);
-
-  assert.equal(summary.source, "sepolia-commit");
-  assert.equal(summary.localSource, "local-commit");
-  assert.equal(summary.seriesId, "series-literal-analysis");
-  assert.equal(summary.method, "five recorded observations; median and min-max");
-  assert.deepEqual(summary.individual.totalGas, { count: 5, min: 930000, median: 942130, max: 950000 });
-  assert.deepEqual(summary.individual.gasPerModel, { count: 5, min: 93000, median: 94213, max: 95000 });
-  assert.deepEqual(summary.individual.roundEndToEndMs, { count: 5, min: 1100, median: 1300, max: 1500 });
-  assert.deepEqual(summary.individual.actualFeeWei, { count: 5, min: 1860000, median: 1884260, max: 1900000 });
-  assert.deepEqual(summary.merkle.totalGas, { count: 5, min: 570000, median: 587661, max: 600000 });
-  assert.deepEqual(summary.merkle.gasPerModel, { count: 5, min: 57000, median: 58766.1, max: 60000 });
-  assert.deepEqual(summary.merkle.roundEndToEndMs, { count: 5, min: 110, median: 130, max: 150 });
-  assert.deepEqual(summary.merkle.actualFeeWei, { count: 5, min: 1140000, median: 1175322, max: 1200000 });
-  assert.deepEqual(summary.comparison, {
-    sepoliaMerkleGasSavingPct: 37.62421321898252,
-    localMerkleGasSavingPct: 37.62421321898252,
-    individualGasDifferenceFromLocalPct: 0,
-    merkleGasDifferenceFromLocalPct: 0,
-  });
-  assert.deepEqual(summary.sourceComparison, sourceComparison);
-  assert.ok(summary.limitations.some((value) => /single batch size/i.test(value)));
-  assert.ok(summary.limitations.some((value) => /five recorded/i.test(value)));
-  assert.ok(summary.limitations.some((value) => /public-network/i.test(value)));
-  assert.equal(JSON.stringify(summary).includes("p95"), false);
 });
 
 test("rejects receipt, topology, round, and experiment arithmetic corruption", () => {
@@ -571,6 +451,34 @@ test("rejects incomplete or inconsistent paid transaction evidence", () => {
   const noncontiguousNonce = createCompletedRaw();
   noncontiguousNonce.transactions[10].nonce += 5;
   assert.throws(() => validateCompletedSepoliaResult(noncontiguousNonce), /nonce.*contiguous/i);
+});
+
+test("rejects invalid paid benchmark metadata and spend beyond approval", () => {
+  const mutations = [
+    ["approved maximum", (raw) => { raw.configuration.approvedMaximumWei = "0"; }],
+    ["approved maximum", (raw) => { raw.configuration.approvedMaximumWei = "1"; }],
+    ["balance before", (raw) => { raw.balanceBeforeWei = "-1"; }],
+    ["balance after", (raw) => { raw.balanceAfterWei = null; }],
+    ["deployer", (raw) => { raw.deployerAddress = "0x0000000000000000000000000000000000000000"; }],
+    ["runtime", (raw) => { raw.runtime.node = ""; }],
+    ["runtime", (raw) => { raw.runtime.hardhat = "   "; }],
+    ["provider label", (raw) => { raw.rpcProviderLabel = "https://rpc.invalid"; }],
+  ];
+
+  for (const [label, mutate] of mutations) {
+    const raw = createCompletedRaw();
+    mutate(raw);
+    assert.throws(
+      () => validateCompletedSepoliaResult(raw),
+      new RegExp(label, "i"),
+      label
+    );
+  }
+
+  const zeroBalances = createCompletedRaw();
+  zeroBalances.balanceBeforeWei = "0";
+  zeroBalances.balanceAfterWei = "0";
+  assert.doesNotThrow(() => validateCompletedSepoliaResult(zeroBalances));
 });
 
 test("rejects forged paid and matched round latency independently of UTC timestamps", () => {
@@ -763,8 +671,9 @@ test("CLI accepts a matched JSON sibling digest and rejects the legacy CSV", () 
   assert.equal(summary.localReference.seriesId, localRaw.seriesId);
   assert.equal(Object.hasOwn(summary, "source"), false);
 
-  writeFileSync(localPath, LOCAL_CSV);
-  writeFileSync(`${localPath}.sha256`, `${createHash("sha256").update(LOCAL_CSV).digest("hex")}\n`);
+  const legacyCsv = "network,batch_size,gas_used\nhardhat,10,587661\n";
+  writeFileSync(localPath, legacyCsv);
+  writeFileSync(`${localPath}.sha256`, `${createHash("sha256").update(legacyCsv).digest("hex")}\n`);
   const legacy = spawnSync(process.execPath, [analyzerPath, publicPath, localPath, outputPath], {
     cwd: directory,
     encoding: "utf8",

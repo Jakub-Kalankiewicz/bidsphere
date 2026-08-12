@@ -235,7 +235,37 @@ export function validateCompletedSepoliaResult(rawValue) {
   ) {
     fail("configuration must match the fixed batch, round, confirmation, timeout, and gas-ceiling values");
   }
-  requireDecimal(configuration.approvedMaximumWei, "configuration approved maximum");
+  const approvedMaximum = requireDecimal(
+    configuration.approvedMaximumWei,
+    "configuration approved maximum"
+  );
+
+  if (
+    typeof raw.deployerAddress !== "string" ||
+    !ADDRESS_PATTERN.test(raw.deployerAddress) ||
+    raw.deployerAddress.toLowerCase() === ZERO_ADDRESS
+  ) {
+    fail("deployer address must be valid and nonzero");
+  }
+  if (
+    raw.rpcProviderLabel !== null &&
+    (
+      typeof raw.rpcProviderLabel !== "string" ||
+      raw.rpcProviderLabel !== raw.rpcProviderLabel.trim() ||
+      !/^[A-Za-z0-9 ._-]{1,80}$/.test(raw.rpcProviderLabel)
+    )
+  ) {
+    fail("RPC provider label must be null or a plain safe label");
+  }
+  const runtime = requireObject(raw.runtime, "runtime");
+  if (
+    typeof runtime.node !== "string" || runtime.node.trim().length === 0 ||
+    typeof runtime.hardhat !== "string" || runtime.hardhat.trim().length === 0
+  ) {
+    fail("runtime node and Hardhat versions must be non-empty strings");
+  }
+  requireDecimal(raw.balanceBeforeWei, "balance before", { allowZero: true });
+  requireDecimal(raw.balanceAfterWei, "balance after", { allowZero: true });
 
   const addresses = requireObject(raw.contractAddresses, "contract addresses");
   if (
@@ -378,6 +408,9 @@ export function validateCompletedSepoliaResult(rawValue) {
   }
   if (requireDecimal(raw.totalActualFeeWei, "experiment fee") !== experimentFee) {
     fail("experiment fee does not agree with receipts");
+  }
+  if (experimentFee > approvedMaximum) {
+    fail("experiment fee exceeds the approved maximum");
   }
   if (requireDecimal(raw.reservedPendingWei, "reserved pending fee", { allowZero: true }) !== 0n) {
     fail("a completed experiment cannot retain a pending fee reservation");
@@ -593,6 +626,25 @@ function exactMetric(rounds, selector) {
   return summarizeExactDecimalStrings(rounds.map(selector));
 }
 
+function divideDecimalIntegerByTen(value) {
+  const integer = BigInt(value);
+  const whole = integer / 10n;
+  const remainder = integer % 10n;
+  return remainder === 0n ? whole.toString() : `${whole}.${remainder}`;
+}
+
+function exactGasPerModelMetric(totalGas) {
+  return {
+    observations: totalGas.observations.map(divideDecimalIntegerByTen),
+    statistics: {
+      count: 5,
+      min: divideDecimalIntegerByTen(totalGas.statistics.min),
+      median: divideDecimalIntegerByTen(totalGas.statistics.median),
+      max: divideDecimalIntegerByTen(totalGas.statistics.max),
+    },
+  };
+}
+
 function numericMetric(rounds, selector) {
   const observations = rounds.map(selector);
   return { observations, statistics: summarizeFive(observations) };
@@ -617,15 +669,13 @@ export function analyzeMatchedBenchmark(raw, local, localDigestSha256, sourceCom
     .sort((left, right) => left.round - right.round);
   const strategySummary = (artifact, strategy) => {
     const rounds = recorded(artifact, strategy);
+    const totalGas = exactMetric(rounds, (round) => round.totalGasUsed);
     const feeWei = rounds.map((round) => round.totalActualFeeWei);
     const feeEth = feeWei.map(weiToEthString);
     const feeStats = summarizeExactDecimalStrings(feeWei).statistics;
     return {
-      totalGas: exactMetric(rounds, (round) => round.totalGasUsed),
-      gasPerModel: numericMetric(
-        rounds,
-        (round) => requireSafeNumber(BigInt(round.totalGasUsed), `${strategy} round gas`) / 10
-      ),
+      totalGas,
+      gasPerModel: exactGasPerModelMetric(totalGas),
       roundEndToEndMs: numericMetric(rounds, (round) => round.wallClockMs),
       actualFeeWei: { observations: feeWei, statistics: feeStats },
       actualFeeEth: {
@@ -670,110 +720,6 @@ export function analyzeMatchedBenchmark(raw, local, localDigestSha256, sourceCom
       "The matched Hardhat reference reproduces storage topology, not public-network timing or fee conditions.",
       "Source equality and a local deployed-bytecode hash do not establish deployed Sepolia bytecode identity.",
     ],
-  };
-}
-
-function parseCsv(csvText) {
-  if (typeof csvText !== "string") throw new Error("Local benchmark CSV must be text");
-  const rows = [];
-  let row = [];
-  let field = "";
-  let quoted = false;
-  for (let index = 0; index < csvText.length; index += 1) {
-    const character = csvText[index];
-    if (quoted) {
-      if (character === '"' && csvText[index + 1] === '"') {
-        field += '"';
-        index += 1;
-      } else if (character === '"') {
-        quoted = false;
-      } else {
-        field += character;
-      }
-    } else if (character === '"' && field.length === 0) {
-      quoted = true;
-    } else if (character === ",") {
-      row.push(field);
-      field = "";
-    } else if (character === "\n" || character === "\r") {
-      if (character === "\r" && csvText[index + 1] === "\n") index += 1;
-      row.push(field);
-      if (row.some((value) => value.length > 0)) rows.push(row);
-      row = [];
-      field = "";
-    } else {
-      field += character;
-    }
-  }
-  if (quoted) throw new Error("Local benchmark CSV contains an unterminated quote");
-  row.push(field);
-  if (row.some((value) => value.length > 0)) rows.push(row);
-  return rows;
-}
-
-function exactBigIntMedian(values) {
-  const sorted = [...values].sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
-  const middle = sorted.length / 2;
-  const doubledMedian = sorted[middle - 1] + sorted[middle];
-  const floor = doubledMedian / 2n;
-  const floorNumber = Number(floor);
-
-  if (doubledMedian % 2n === 0n) {
-    if (!Number.isSafeInteger(floorNumber) || BigInt(floorNumber) !== floor) {
-      throw new Error("Local benchmark CSV median cannot be exactly represented as a JavaScript number");
-    }
-    return floorNumber;
-  }
-
-  const ceil = floor + 1n;
-  const ceilNumber = Number(ceil);
-  const candidate = floorNumber + 0.5;
-  if (
-    !Number.isSafeInteger(floorNumber) ||
-    !Number.isSafeInteger(ceilNumber) ||
-    BigInt(floorNumber) !== floor ||
-    BigInt(ceilNumber) !== ceil ||
-    candidate - floorNumber !== 0.5 ||
-    ceilNumber - candidate !== 0.5
-  ) {
-    throw new Error("Local benchmark CSV median cannot be exactly represented as a JavaScript number");
-  }
-  return candidate;
-}
-
-export function parseLocalBatchTenCsv(csvText) {
-  const rows = parseCsv(csvText);
-  if (rows.length === 0) throw new Error("Local benchmark CSV is empty");
-  const header = rows[0];
-  const requiredHeaders = ["commit", "network", "batch_size", "individual_total_gas", "merkle_batch_gas"];
-  const indexes = Object.fromEntries(requiredHeaders.map((name) => [name, header.indexOf(name)]));
-  if (Object.values(indexes).some((index) => index < 0)) {
-    throw new Error("Local benchmark CSV is missing a required header");
-  }
-  const matching = rows.slice(1).filter(
-    (fields) => fields[indexes.network] === "hardhat" && fields[indexes.batch_size] === "10"
-  );
-  if (matching.length !== 30) {
-    throw new Error("Local benchmark CSV must contain exactly 30 Hardhat batch-size-10 rows");
-  }
-  const codeVersions = new Set(matching.map((fields) => fields[indexes.commit]));
-  if (codeVersions.size !== 1 || [...codeVersions][0].length === 0) {
-    throw new Error("Local benchmark rows must share one non-empty commit identifier");
-  }
-  const parseGas = (fields, headerName) => {
-    const value = fields[indexes[headerName]];
-    if (!/^\d+$/.test(value)) throw new Error(`${headerName} must contain positive integers`);
-    const integer = BigInt(value);
-    if (integer <= 0n) throw new Error(`${headerName} must contain positive integers`);
-    return integer;
-  };
-  return {
-    network: "hardhat",
-    batchSize: 10,
-    rows: 30,
-    codeVersion: [...codeVersions][0],
-    individualTotalGasMedian: exactBigIntMedian(matching.map((fields) => parseGas(fields, "individual_total_gas"))),
-    merkleBatchGasMedian: exactBigIntMedian(matching.map((fields) => parseGas(fields, "merkle_batch_gas"))),
   };
 }
 
@@ -834,74 +780,6 @@ function percentageDifference(value, reference) {
 
 function gasSavingPercentage(individual, merkle) {
   return ((individual - merkle) / individual) * 100;
-}
-
-export function analyzeSepoliaBenchmark(raw, localReference, sourceComparison) {
-  validateCompletedSepoliaResult(raw);
-  if (
-    localReference?.network !== "hardhat" ||
-    localReference?.batchSize !== 10 ||
-    localReference?.rows !== 30 ||
-    typeof localReference.codeVersion !== "string" ||
-    !Number.isFinite(localReference.individualTotalGasMedian) ||
-    !Number.isFinite(localReference.merkleBatchGasMedian)
-  ) {
-    throw new Error("Invalid local Hardhat batch-ten reference");
-  }
-  if (
-    typeof sourceComparison?.codeVersionIdentifiersMatch !== "boolean" ||
-    typeof sourceComparison?.modelRegistrySourceUnchanged !== "boolean" ||
-    sourceComparison?.bytecodeIdentityClaimed !== false
-  ) {
-    throw new Error("Invalid source comparison");
-  }
-
-  const recordedRounds = (strategy) => raw.rounds
-    .filter((round) => round.strategy === strategy && round.warmup === false)
-    .sort((left, right) => left.round - right.round);
-  const buildStrategy = (strategy) => {
-    const rounds = recordedRounds(strategy);
-    return {
-      totalGas: summarizeFive(rounds.map((round) => requireSafeNumber(BigInt(round.totalGasUsed), `${strategy} round gas`))),
-      gasPerModel: summarizeFive(rounds.map((round) => requireSafeNumber(BigInt(round.totalGasUsed), `${strategy} round gas`) / 10)),
-      roundEndToEndMs: summarizeFive(rounds.map((round) => round.wallClockMs)),
-      actualFeeWei: summarizeFive(rounds.map((round) => requireSafeNumber(BigInt(round.totalActualFeeWei), `${strategy} round fee`))),
-    };
-  };
-  const individual = buildStrategy("individual");
-  const merkle = buildStrategy("merkle");
-  const limitations = [
-    "A single batch size (10 models) was observed.",
-    "Only five recorded observations per strategy were summarized.",
-    "Confirmation latency and fees reflect one time-dependent Sepolia public-network series and RPC path.",
-    "Source equality does not establish deployed bytecode identity.",
-  ];
-  if (!sourceComparison.codeVersionIdentifiersMatch) {
-    limitations.push("The local and Sepolia code-version identifiers differ.");
-  }
-  if (!sourceComparison.modelRegistrySourceUnchanged) {
-    limitations.push("ModelRegistry.sol changed between the local and Sepolia code versions.");
-  }
-
-  return {
-    source: raw.codeVersion,
-    localSource: localReference.codeVersion,
-    seriesId: raw.seriesId,
-    generatedAtUtc: new Date().toISOString(),
-    method: "five recorded observations; median and min-max",
-    batchSize: 10,
-    recordedRounds: 5,
-    individual,
-    merkle,
-    comparison: {
-      sepoliaMerkleGasSavingPct: gasSavingPercentage(individual.totalGas.median, merkle.totalGas.median),
-      localMerkleGasSavingPct: gasSavingPercentage(localReference.individualTotalGasMedian, localReference.merkleBatchGasMedian),
-      individualGasDifferenceFromLocalPct: percentageDifference(individual.totalGas.median, localReference.individualTotalGasMedian),
-      merkleGasDifferenceFromLocalPct: percentageDifference(merkle.totalGas.median, localReference.merkleBatchGasMedian),
-    },
-    sourceComparison: { ...sourceComparison },
-    limitations,
-  };
 }
 
 async function existingOutputEndpoint(path, inspect) {

@@ -116,7 +116,7 @@ duration or round-latency arithmetic.
 
 The raw artifact contains:
 
-- unique series identifier and UTC timestamps;
+- a unique series identifier formed from a filesystem-safe UTC timestamp and 64 bits of cryptographically secure random entropy, plus UTC timestamps;
 - status: `running`, `completed`, or `aborted` with a reason;
 - Node.js, Hardhat, network and chain ID;
 - public deployer and contract addresses;
@@ -133,6 +133,11 @@ The raw artifact contains:
 - total experiment gas and fee;
 - the user-approved maximum cost and remaining wallet balance checks.
 
+Before creating the initial checkpoint or sending any transaction, the paid
+runner requires the code-version value to be lowercase full 40-hex, verifies
+that it names a direct Git commit object, and verifies that it equals the
+checked-out `HEAD`.
+
 The artifact must not contain the private key, RPC URL, environment-variable
 values, cookies, or authenticated application data. An optional provider label
 may be stored only as a non-secret name supplied separately from the URL.
@@ -141,7 +146,7 @@ may be stored only as a non-secret name supplied separately from the URL.
 
 The canonical raw result is written to:
 
-`measurements/raw/sepolia/sepolia-gas-latency-<timestamp>.json`
+`measurements/raw/sepolia/sepolia-gas-latency-<timestamp>-<64-bit-entropy>.json`
 
 Before each provider broadcast, the runner locally signs the fully populated
 transaction, derives its exact hash and nonce, and atomically checkpoints a
@@ -181,8 +186,11 @@ For five recorded rounds, in original round order, the report includes:
 - relative difference between the two strategies;
 - difference between Sepolia gas use and the local Hardhat reference.
 
-Gas and fee observations use exact decimal strings. Fee values are also
-rendered as deterministic decimal ETH strings. The processed summary includes
+Gas totals, gas-per-model values, and fee observations use exact decimal
+strings. Gas per model is obtained by exact division by the fixed batch size of
+ten, with one fractional decimal digit only when necessary; it is never rounded
+through binary floating point. Fee values are also rendered as deterministic
+decimal ETH strings. The processed summary includes
 the local series ID and artifact SHA-256, but excludes both code-version hashes
 (`source` and `localSource` are not output).
 

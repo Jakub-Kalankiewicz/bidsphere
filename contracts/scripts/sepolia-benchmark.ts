@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { performance } from "node:perf_hooks";
 import { resolve } from "node:path";
 
@@ -24,6 +25,7 @@ import {
   createInitialBenchmarkResult,
   parseApprovedMaximumWei,
   recoverSameHashStatusZeroReceipt,
+  validateBenchmarkCodeVersion,
   withTimeout,
   type BenchmarkOperation,
   type BenchmarkTransactionRecord,
@@ -53,14 +55,6 @@ function benchmarkProviderLabel(value: string | undefined): string | null {
     throw new Error("SEPOLIA_BENCHMARK_RPC_PROVIDER_LABEL must be a plain label");
   }
   return label;
-}
-
-function requiredCodeVersion(value: string | undefined): string {
-  const codeVersion = value?.trim();
-  if (!codeVersion) {
-    throw new Error("SEPOLIA_BENCHMARK_CODE_VERSION is required");
-  }
-  return codeVersion;
 }
 
 function sanitizeErrorMessage(
@@ -191,6 +185,24 @@ async function main(): Promise<void> {
   let deployerAddress: string | null = null;
 
   try {
+    const repositoryRoot = resolve(__dirname, "../..");
+    const codeVersion = validateBenchmarkCodeVersion(
+      process.env.SEPOLIA_BENCHMARK_CODE_VERSION,
+      {
+        objectType: (identifier) =>
+          execFileSync("git", ["cat-file", "-t", identifier], {
+            cwd: repositoryRoot,
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "pipe"],
+          }),
+        headCommit: () =>
+          execFileSync("git", ["rev-parse", "--verify", "HEAD^{commit}"], {
+            cwd: repositoryRoot,
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "pipe"],
+          }),
+      }
+    );
     const runtimeNetwork = await ethers.provider.getNetwork();
     assertSepoliaPreflightInputs(network.name, runtimeNetwork.chainId, process.env);
     const privateKey = process.env.BLOCKCHAIN_PRIVATE_KEY;
@@ -200,9 +212,6 @@ async function main(): Promise<void> {
 
     const approvedMaximumWei = parseApprovedMaximumWei(
       process.env.SEPOLIA_BENCHMARK_MAX_COST_WEI
-    );
-    const codeVersion = requiredCodeVersion(
-      process.env.SEPOLIA_BENCHMARK_CODE_VERSION
     );
     const rpcProviderLabel = benchmarkProviderLabel(
       process.env.SEPOLIA_BENCHMARK_RPC_PROVIDER_LABEL

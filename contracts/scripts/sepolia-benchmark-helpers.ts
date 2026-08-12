@@ -14,6 +14,31 @@ export const SEPOLIA_BENCHMARK_GAS_LIMITS = Object.freeze({
   merkleRegistration: 750_000n,
 });
 
+export interface BenchmarkCodeVersionRepository {
+  objectType(identifier: string): string;
+  headCommit(): string;
+}
+
+export function validateBenchmarkCodeVersion(
+  value: string | undefined,
+  repository: BenchmarkCodeVersionRepository
+): string {
+  const identifier = value?.trim();
+  if (!identifier) throw new Error("SEPOLIA_BENCHMARK_CODE_VERSION is required");
+  if (!/^[0-9a-f]{40}$/.test(identifier)) {
+    throw new Error(
+      "SEPOLIA_BENCHMARK_CODE_VERSION must be a lowercase full 40-character commit identifier"
+    );
+  }
+  if (repository.objectType(identifier).trim() !== "commit") {
+    throw new Error("SEPOLIA_BENCHMARK_CODE_VERSION must identify a direct commit object");
+  }
+  if (repository.headCommit().trim() !== identifier) {
+    throw new Error("SEPOLIA_BENCHMARK_CODE_VERSION must equal the checked-out HEAD commit");
+  }
+  return identifier;
+}
+
 export type BenchmarkStrategy = "individual" | "merkle";
 export type BenchmarkOperationKind =
   | "deployment"

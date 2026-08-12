@@ -19,6 +19,7 @@ import {
   createInitialBenchmarkResult,
   parseApprovedMaximumWei,
   recoverSameHashStatusZeroReceipt,
+  validateBenchmarkCodeVersion,
   withTimeout,
 } from "../contracts/scripts/sepolia-benchmark-helpers.ts";
 import type { BenchmarkTransactionRecord } from "../contracts/scripts/sepolia-benchmark-helpers.ts";
@@ -64,6 +65,45 @@ test("creates unique formatted series IDs across two calls", () => {
   assert.match(first, expectedFormat);
   assert.match(second, expectedFormat);
   assert.notEqual(first, second);
+});
+
+test("accepts only the checked-out lowercase full direct commit identifier", () => {
+  const commit = "0123456789abcdef0123456789abcdef01234567";
+  const repository = {
+    objectType: (identifier: string) => {
+      assert.equal(identifier, commit);
+      return "commit";
+    },
+    headCommit: () => commit,
+  };
+
+  assert.equal(validateBenchmarkCodeVersion(commit, repository), commit);
+  for (const invalid of [undefined, "abc123", commit.toUpperCase(), "--help"]) {
+    let inspected = false;
+    assert.throws(
+      () => validateBenchmarkCodeVersion(invalid, {
+        objectType: () => { inspected = true; return "commit"; },
+        headCommit: () => commit,
+      }),
+      /full|lowercase|40|code version|required/i
+    );
+    assert.equal(inspected, false);
+  }
+
+  assert.throws(
+    () => validateBenchmarkCodeVersion(commit, {
+      objectType: () => "tag",
+      headCommit: () => commit,
+    }),
+    /direct commit/i
+  );
+  assert.throws(
+    () => validateBenchmarkCodeVersion(commit, {
+      objectType: () => "commit",
+      headCommit: () => "1".repeat(40),
+    }),
+    /checked-out HEAD/i
+  );
 });
 
 test("derives the exact 16.5 million gas aggregate ceiling", () => {

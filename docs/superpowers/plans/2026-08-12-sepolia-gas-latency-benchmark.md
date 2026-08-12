@@ -32,13 +32,16 @@
 - Create `contracts/scripts/sepolia-benchmark-checkpoint.ts`: atomic raw-result checkpoint writer.
 - Create `contracts/scripts/sepolia-benchmark-preflight.ts`: read-only Sepolia validation and whole-experiment cost bound.
 - Create `contracts/scripts/sepolia-benchmark.ts`: two-contract sequential benchmark runner.
+- Create `contracts/scripts/benchmark-gas-sepolia-matched.ts`: matched two-contract Hardhat runner and atomic JSON/checksum writer.
+- Create `contracts/test/SepoliaMatchedBenchmark.test.ts`: real Hardhat topology, gas-state, and artifact-writer tests.
 - Create `tests/sepolia-benchmark-helpers.test.ts`: pure planning, cost, timing, and serialization tests.
 - Create `tests/sepolia-benchmark-checkpoint.test.ts`: filesystem behavior for running, completed, aborted, and secret-rejected checkpoints.
+- Create `tests/sepolia-benchmark-transaction.test.ts`: signed-transaction and receipt-state tests.
 - Create `scripts/analyze-sepolia-benchmark.mjs`: raw validation and separate Hardhat-versus-Sepolia descriptive summary.
 - Create `tests/sepolia-benchmark-analysis.test.mjs`: five-observation analysis fixtures and p95 exclusion.
 - Modify `contracts/package.json`: add read-only preflight and transaction-runner commands.
 - Modify `package.json`: include new tests and add the analysis command.
-- Create after execution the canonical raw path returned by `join("measurements/raw/sepolia", `${seriesId}.json`)`, where `seriesId` is generated once as `sepolia-gas-latency-` plus the filesystem-safe UTC timestamp.
+- Create after execution the canonical raw path returned by `join("measurements/raw/sepolia", `${seriesId}.json`)`, where `seriesId` is generated once as `sepolia-gas-latency-` plus the filesystem-safe UTC timestamp and 64 bits of cryptographically secure random entropy.
 - Create after execution the derived path returned by `join("measurements/processed", `${seriesId}-summary.json`)`.
 - Modify after successful validation `/Users/jakub.kalankiewicz/Code/personal/WUT_Thesis/thesis-work/state.md`, `session-summary.md`, `experiment-protocol.md`, and `remaining-tests-plan.md`: record actual outcome and limitations.
 
@@ -478,7 +481,7 @@ Add `aggregateRound(records)`, `calculateReservedPendingWei(records)`, `createIn
 
 - [ ] **Step 4: Implement the runner setup and two deployments**
 
-The runner validates Sepolia inputs, parses the approved maximum, requires a non-empty code version, accepts only a plain non-secret provider label matching `/^[A-Za-z0-9 ._-]{1,80}$/`, builds a unique series ID and operation plan, captures balance before, and writes the initial `running` checkpoint before any transaction. For every operation it obtains fresh fee data and gas estimate, applies the fixed gas limit and current `maxFeePerGas`/`maxPriorityFeePerGas`, then calls the budget gate before broadcasting.
+The runner first requires `SEPOLIA_BENCHMARK_CODE_VERSION` to be a lowercase full 40-hex identifier naming a direct commit object and exactly matching the checked-out `HEAD`. It performs this check before the initial checkpoint or any transaction. It then validates Sepolia inputs, parses the approved maximum, accepts only a plain non-secret provider label matching `/^[A-Za-z0-9 ._-]{1,80}$/`, builds a unique series ID and operation plan, captures balance before, and writes the initial `running` checkpoint. For every operation it obtains fresh fee data and gas estimate, applies the fixed gas limit and current `maxFeePerGas`/`maxPriorityFeePerGas`, then calls the budget gate before broadcasting.
 
 Deploy the individual contract first and the Merkle contract second. Populate and locally sign every deployment or contract-call transaction, derive its exact hash and nonce, and checkpoint a `pending` pre-broadcast intent with its worst-case reserved cost. Only after that checkpoint succeeds, broadcast the exact signed bytes once. Checkpoint provider acknowledgement separately. After receipt, replace the pending record with the confirmed record, update actual cumulative spending, and checkpoint again. Never retry after response loss or a post-broadcast checkpoint failure.
 
@@ -589,14 +592,14 @@ SepoliaBenchmarkSummary = {
   recordedRounds: 5,
   individual: {
     totalGas: { observations: string[5], statistics: { count: 5, min: string, median: string, max: string } },
-    gasPerModel: { observations: number[5], statistics: { count: 5, min: number, median: number, max: number } },
+    gasPerModel: { observations: string[5], statistics: { count: 5, min: string, median: string, max: string } },
     roundEndToEndMs: { observations: number[5], statistics: { count: 5, min: number, median: number, max: number } },
     actualFeeWei: { observations: string[5], statistics: object },
     actualFeeEth: { observations: string[5], statistics: object }
   },
   merkle: {
     totalGas: { observations: string[5], statistics: { count: 5, min: string, median: string, max: string } },
-    gasPerModel: { observations: number[5], statistics: { count: 5, min: number, median: number, max: number } },
+    gasPerModel: { observations: string[5], statistics: { count: 5, min: string, median: string, max: string } },
     roundEndToEndMs: { observations: number[5], statistics: { count: 5, min: number, median: number, max: number } },
     actualFeeWei: { observations: string[5], statistics: object },
     actualFeeEth: { observations: string[5], statistics: object }
@@ -660,7 +663,7 @@ output. The legacy CSV remains valid for the original experiment only.
 "analyze:sepolia-benchmark": "node scripts/analyze-sepolia-benchmark.mjs"
 ```
 
-Extend `test:verify` with `tests/sepolia-benchmark-helpers.test.ts`, `tests/sepolia-benchmark-checkpoint.test.ts`, and `tests/sepolia-benchmark-analysis.test.mjs`. Keep the existing test files and order otherwise unchanged.
+Extend `test:verify` with `tests/sepolia-benchmark-helpers.test.ts`, `tests/sepolia-benchmark-checkpoint.test.ts`, `tests/sepolia-benchmark-transaction.test.ts`, and `tests/sepolia-benchmark-analysis.test.mjs`. Keep the existing test files and order otherwise unchanged. The matched runner's real-network simulation remains wired through `contracts/test/SepoliaMatchedBenchmark.test.ts` in the contracts test suite.
 
 - [ ] **Step 7: Run focused and full local verification**
 
@@ -724,7 +727,7 @@ Report the current balance, fee estimate, 16.5-million-gas ceiling, exact maximu
 - Modify only if a defect is reproduced: runner/helper/test files from Tasks 1-6, using a fresh RED-GREEN cycle.
 
 **Interfaces:**
-- Consumes: the exact user-approved maximum from Task 7 and a non-empty current code-version identifier retained only in raw metadata.
+- Consumes: the exact user-approved maximum from Task 7 and a lowercase full 40-hex direct commit identifier equal to the checked-out `HEAD`, retained only in raw metadata.
 - Produces: completed or safely aborted raw artifact; a processed summary only for a completed, validated artifact.
 
 - [ ] **Step 1: Recheck current fee and approved budget at execution start**
@@ -733,7 +736,7 @@ Run preflight again. If the new `boundedMaximumCostWei` exceeds the amount appro
 
 - [ ] **Step 2: Start the benchmark with the exact approved wei value**
 
-Set `SEPOLIA_BENCHMARK_MAX_COST_WEI` to the exact approved decimal value and `SEPOLIA_BENCHMARK_CODE_VERSION` to the current full commit identifier, then run from `contracts/`:
+Set `SEPOLIA_BENCHMARK_MAX_COST_WEI` to the exact approved decimal value and `SEPOLIA_BENCHMARK_CODE_VERSION` to the current lowercase full direct commit identifier (which the runner verifies equals `HEAD`), then run from `contracts/`:
 
 ```bash
 npm run sepolia:benchmark
