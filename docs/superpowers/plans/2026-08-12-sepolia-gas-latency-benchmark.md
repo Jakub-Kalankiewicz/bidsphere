@@ -444,8 +444,11 @@ git commit -m "feat: preflight Sepolia benchmark budget"
 
 **Files:**
 - Create: `contracts/scripts/sepolia-benchmark.ts`
+- Create: `contracts/scripts/sepolia-benchmark-transaction.ts`
+- Create: `tests/sepolia-benchmark-transaction.test.ts`
 - Modify: `contracts/package.json`
 - Modify: `contracts/scripts/sepolia-benchmark-helpers.ts`
+- Modify: `package.json`
 - Modify: `tests/sepolia-benchmark-helpers.test.ts`
 
 **Interfaces:**
@@ -470,7 +473,7 @@ Add `aggregateRound(records)`, `calculateReservedPendingWei(records)`, `createIn
 
 The runner validates Sepolia inputs, parses the approved maximum, requires a non-empty code version, accepts only a plain non-secret provider label matching `/^[A-Za-z0-9 ._-]{1,80}$/`, builds a unique series ID and operation plan, captures balance before, and writes the initial `running` checkpoint before any transaction. For every operation it obtains fresh fee data and gas estimate, applies the fixed gas limit and current `maxFeePerGas`/`maxPriorityFeePerGas`, then calls the budget gate before broadcasting.
 
-Deploy the individual contract first and the Merkle contract second. After a transaction hash is returned, checkpoint a `pending` record with its worst-case reserved cost. After receipt, replace it with the confirmed record, update actual cumulative spending, and checkpoint again.
+Deploy the individual contract first and the Merkle contract second. Populate and locally sign every deployment or contract-call transaction, derive its exact hash and nonce, and checkpoint a `pending` pre-broadcast intent with its worst-case reserved cost. Only after that checkpoint succeeds, broadcast the exact signed bytes once. Checkpoint provider acknowledgement separately. After receipt, replace the pending record with the confirmed record, update actual cumulative spending, and checkpoint again. Never retry after response loss or a post-broadcast checkpoint failure.
 
 - [ ] **Step 5: Implement sequential registration rounds and timing boundaries**
 
@@ -491,7 +494,7 @@ The top-level runner catch obtains a final read-only balance when possible, writ
 Run from repository root:
 
 ```bash
-node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/sepolia-benchmark-helpers.test.ts tests/sepolia-benchmark-checkpoint.test.ts
+node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/sepolia-benchmark-helpers.test.ts tests/sepolia-benchmark-checkpoint.test.ts tests/sepolia-benchmark-transaction.test.ts
 cd contracts && npx tsc --noEmit && npm test
 ```
 

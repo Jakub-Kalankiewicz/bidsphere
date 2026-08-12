@@ -108,7 +108,8 @@ The raw artifact contains:
 - a code-version identifier retained only in raw research data;
 - batch size, warm-up count and recorded repetition count;
 - per-transaction strategy, round, sequence number and warm-up flag;
-- transaction hash, block number, receipt status and confirmation count;
+- transaction hash, nonce, broadcast-acknowledgement state, block number,
+  receipt status and confirmation count;
 - gas estimate, configured gas limit, `gasUsed`, effective gas price and
   actual fee in wei;
 - submission, confirmation and end-to-end durations;
@@ -126,11 +127,17 @@ The canonical raw result is written to:
 
 `measurements/raw/sepolia/sepolia-gas-latency-<timestamp>.json`
 
-The runner updates a temporary checkpoint after every confirmed transaction
-and atomically renames it into place. If the experiment stops after some
-transactions have been sent, the retained artifact has status `aborted`, lists
-the completed operations, and reports the actual partial cost. A rerun creates
-a new series instead of appending to or overwriting the previous one.
+Before each provider broadcast, the runner locally signs the fully populated
+transaction, derives its exact hash and nonce, and atomically checkpoints a
+pending intent with its worst-case reserved cost. It then broadcasts those
+exact signed bytes once. Provider acknowledgement and the later receipt are
+checkpointed as separate state transitions. Thus a lost RPC response or a
+checkpoint failure after provider acceptance still leaves the pre-broadcast
+hash, nonce and reservation available for reconciliation, and never causes a
+retry. If the experiment stops after some transactions have been sent, the
+retained artifact has status `aborted`, lists the completed and pending
+operations, and reports the actual partial cost. A rerun creates a new series
+instead of appending to or overwriting the previous one.
 
 A separate analysis step writes a derived summary under
 `measurements/processed/`. The raw artifact is never modified by analysis.
