@@ -340,12 +340,16 @@ export function validateCompletedMatchedHardhatResult(rawValue) {
   const matchedFail = (message) => {
     throw new Error(`Invalid matched Hardhat benchmark: ${message}`);
   };
-  if (raw.schemaVersion !== 1 || raw.artifactKind !== "bidsphere-sepolia-matched-hardhat") {
-    matchedFail("schema and artifact kind must identify the matched reference");
+  if (
+    raw.schemaVersion !== 1 ||
+    raw.kind !== "hardhat-sepolia-matched" ||
+    raw.status !== "completed"
+  ) {
+    matchedFail("schema, kind, and status must identify a completed matched reference");
   }
   if (raw.network !== "hardhat") matchedFail('network must be "hardhat"');
   if (raw.chainId !== 31337) matchedFail("chain ID must be 31337");
-  if (raw.storageTopology !== "one-long-lived-contract-per-strategy") {
+  if (raw.topology !== "one-long-lived-contract-per-strategy") {
     matchedFail("storage topology must use one long-lived contract per strategy");
   }
   if (typeof raw.codeVersion !== "string" || !FULL_COMMIT_PATTERN.test(raw.codeVersion)) {
@@ -363,7 +367,7 @@ export function validateCompletedMatchedHardhatResult(rawValue) {
   if (
     typeof runtime.node !== "string" || typeof runtime.hardhat !== "string" ||
     compiler.version !== "0.8.19" || compiler.optimizerEnabled !== false ||
-    compiler.optimizerRuns !== 200
+    compiler.optimizerRuns !== 200 || compiler.evmVersion !== "paris"
   ) {
     matchedFail("runtime and compiler settings are invalid");
   }
@@ -394,13 +398,24 @@ export function validateCompletedMatchedHardhatResult(rawValue) {
     reservedPendingWei: "0",
   });
 
+  for (const record of raw.transactions) {
+    const expectedAddress = raw.contractAddresses[record.strategy];
+    if (
+      typeof record.contractAddress !== "string" ||
+      !ADDRESS_PATTERN.test(record.contractAddress) ||
+      record.contractAddress.toLowerCase() !== expectedAddress.toLowerCase()
+    ) {
+      matchedFail("every transaction must identify its strategy contract address");
+    }
+  }
+
   const merkle = raw.transactions.filter((record) => record.kind === "merkle-registration");
   if (
     merkle.length !== 6 ||
     merkle.some((record, index) =>
       record.round !== index ||
-      record.merkleBatchCountBefore !== index ||
-      record.merkleBatchCountAfter !== index + 1
+      record.batchCountBefore !== index ||
+      record.batchCountAfter !== index + 1
     ) ||
     raw.finalMerkleBatchCount !== 6
   ) {
@@ -408,7 +423,7 @@ export function validateCompletedMatchedHardhatResult(rawValue) {
   }
   if (raw.transactions.some((record) =>
     record.kind !== "merkle-registration" &&
-    (record.merkleBatchCountBefore !== null || record.merkleBatchCountAfter !== null)
+    (record.batchCountBefore !== null || record.batchCountAfter !== null)
   )) {
     matchedFail("only Merkle transactions may carry batch count observations");
   }
@@ -498,7 +513,7 @@ export function analyzeMatchedBenchmark(raw, local, localDigestSha256, sourceCom
     localReference: {
       seriesId: local.seriesId,
       sha256: localDigestSha256,
-      storageTopology: local.storageTopology,
+      topology: local.topology,
     },
     generatedAtUtc: new Date().toISOString(),
     method: "five recorded observations; median and min-max",

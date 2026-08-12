@@ -52,10 +52,22 @@ same full 40-hex code-version identifier as the Sepolia artifact.
 
 The matched artifact records Hardhat chain ID 31337, runtime and Solidity
 compiler settings, the deployed runtime-bytecode Keccak-256, two public local
-contract addresses, 68 successful receipts, 12 round aggregates, and Merkle
-`batchCount` transitions `0 -> 1` through `5 -> 6`. After atomically replacing
-the final JSON, the writer hashes its exact bytes and atomically writes a
-sibling `<artifact>.sha256` containing lowercase 64-hex plus a newline.
+contract addresses, and the destination contract address and actually
+submitted fixed gas limit for each of 68 successful receipts. It also records
+12 round aggregates and Merkle `batchCount` transitions `0 -> 1` through
+`5 -> 6`. The artifact is identified by `kind: "hardhat-sepolia-matched"`,
+`status: "completed"`, and
+`topology: "one-long-lived-contract-per-strategy"`. Its truthful compiler
+metadata includes Solidity 0.8.19, optimizer disabled with 200 configured runs,
+and EVM version `paris`. After atomically replacing the final JSON, the writer
+hashes its exact bytes and atomically writes a sibling `<artifact>.sha256`
+containing lowercase 64-hex plus a newline.
+
+The runner requires `GAS_BENCHMARK_COMMIT`. An optional
+`HARDHAT_MATCHED_BENCHMARK_OUTPUT` overrides the destination; otherwise the
+runner creates an absolute path under
+`measurements/raw/hardhat-sepolia-matched/`. Its final public JSON line prints
+the exact `rawPath`, `checksumPath`, and `sha256` digest.
 
 The existing local measurements are approximately:
 

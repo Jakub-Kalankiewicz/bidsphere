@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 
@@ -22,6 +22,7 @@ interface MatchedTransactionRecord {
   modelIds: string[];
   merkleRoot: string | null;
   transactionHash: string;
+  contractAddress: string;
   status: "confirmed";
   blockNumber: number;
   receiptStatus: 1;
@@ -33,8 +34,8 @@ interface MatchedTransactionRecord {
   submittedAtUtc: string;
   receiptAtUtc: string;
   endToEndMs: number;
-  merkleBatchCountBefore: number | null;
-  merkleBatchCountAfter: number | null;
+  batchCountBefore: number | null;
+  batchCountAfter: number | null;
 }
 
 interface MatchedRoundAggregate {
@@ -49,14 +50,15 @@ interface MatchedRoundAggregate {
 
 export interface SepoliaMatchedHardhatResult {
   schemaVersion: 1;
-  artifactKind: "bidsphere-sepolia-matched-hardhat";
+  kind: "hardhat-sepolia-matched";
+  status: "completed";
   seriesId: string;
   startedAtUtc: string;
   completedAtUtc: string;
   network: "hardhat";
   chainId: 31337;
   codeVersion: string;
-  storageTopology: "one-long-lived-contract-per-strategy";
+  topology: "one-long-lived-contract-per-strategy";
   runtime: {
     node: string;
     hardhat: string;
@@ -64,6 +66,7 @@ export interface SepoliaMatchedHardhatResult {
       version: "0.8.19";
       optimizerEnabled: false;
       optimizerRuns: 200;
+      evmVersion: "paris";
     };
   };
   deployedBytecodeKeccak256: string;
@@ -85,6 +88,18 @@ export interface SepoliaMatchedHardhatResult {
 function seriesId(now = new Date()): string {
   const timestamp = now.toISOString().replace(/[:.]/g, "-");
   return `hardhat-sepolia-matched-${timestamp}-${randomBytes(8).toString("hex")}`;
+}
+
+export function defaultMatchedBenchmarkOutputPath(benchmarkSeriesId: string): string {
+  return resolve(
+    __dirname,
+    "..",
+    "..",
+    "measurements",
+    "raw",
+    "hardhat-sepolia-matched",
+    `hardhat-sepolia-matched-${benchmarkSeriesId}.json`
+  );
 }
 
 async function writeAtomicEvidence(
@@ -129,7 +144,8 @@ function aggregateRounds(records: MatchedTransactionRecord[]): MatchedRoundAggre
 
 export async function runSepoliaMatchedBenchmark(
   outputPath: string,
-  codeVersion: string
+  codeVersion: string,
+  benchmarkSeriesId = seriesId()
 ): Promise<SepoliaMatchedHardhatResult> {
   if (!FULL_COMMIT.test(codeVersion)) {
     throw new Error("Matched benchmark code version must be a lowercase full commit identifier");
@@ -140,7 +156,6 @@ export async function runSepoliaMatchedBenchmark(
   }
 
   const startedAtUtc = new Date().toISOString();
-  const benchmarkSeriesId = seriesId(new Date(startedAtUtc));
   const operations = buildBenchmarkOperationPlan(benchmarkSeriesId);
   const factory = await ethers.getContractFactory("ModelRegistry");
   const artifact = await artifacts.readArtifact("ModelRegistry");
@@ -154,29 +169,38 @@ export async function runSepoliaMatchedBenchmark(
     const startedMs = performance.now();
     let response;
     let countBefore: number | null = null;
+    let contractAddress: string | null = null;
 
     if (operation.kind === "deployment") {
-      const contract = await factory.deploy();
+      const contract = await factory.deploy({ gasLimit: operation.gasLimit });
       response = contract.deploymentTransaction();
       if (!response) throw new Error("Deployment transaction is unavailable");
     } else if (operation.kind === "individual-registration") {
       if (!individualAddress) throw new Error("Individual contract is unavailable");
+      contractAddress = individualAddress;
       const contract = await ethers.getContractAt("ModelRegistry", individualAddress);
       const modelId = operation.modelIds[0];
       response = await contract.registerModel(
         modelId,
-        ethers.keccak256(ethers.toUtf8Bytes(modelId))
+        ethers.keccak256(ethers.toUtf8Bytes(modelId)),
+        { gasLimit: operation.gasLimit }
       );
     } else {
       if (!merkleAddress || !operation.merkleRoot) {
         throw new Error("Merkle contract is unavailable");
       }
+      contractAddress = merkleAddress;
       const contract = await ethers.getContractAt("ModelRegistry", merkleAddress);
       countBefore = Number(await contract.batchCount());
       response = await contract.registerMerkleRoot(
         operation.merkleRoot,
-        operation.modelIds
+        operation.modelIds,
+        { gasLimit: operation.gasLimit }
       );
+    }
+
+    if (response.gasLimit !== operation.gasLimit) {
+      throw new Error(`Operation ${operation.operationId} did not use its fixed gas limit`);
     }
 
     const receipt = await response.wait(1);
@@ -188,11 +212,15 @@ export async function runSepoliaMatchedBenchmark(
     let countAfter: number | null = null;
     if (operation.kind === "deployment") {
       if (!receipt.contractAddress) throw new Error("Deployment address is unavailable");
+      contractAddress = receipt.contractAddress;
       if (operation.strategy === "individual") individualAddress = receipt.contractAddress;
       else merkleAddress = receipt.contractAddress;
     } else if (operation.kind === "merkle-registration") {
       const contract = await ethers.getContractAt("ModelRegistry", merkleAddress!);
       countAfter = Number(await contract.batchCount());
+    }
+    if (!contractAddress) {
+      throw new Error(`Operation ${operation.operationId} has no contract address`);
     }
 
     transactions.push({
@@ -205,19 +233,20 @@ export async function runSepoliaMatchedBenchmark(
       modelIds: [...operation.modelIds],
       merkleRoot: operation.merkleRoot,
       transactionHash: receipt.hash,
+      contractAddress,
       status: "confirmed",
       blockNumber: receipt.blockNumber,
       receiptStatus: 1,
       confirmationsRequested: 1,
-      gasLimit: operation.gasLimit.toString(),
+      gasLimit: response.gasLimit.toString(),
       gasUsed: receipt.gasUsed.toString(),
       effectiveGasPriceWei: gasPrice.toString(),
       actualFeeWei: (receipt.gasUsed * gasPrice).toString(),
       submittedAtUtc,
       receiptAtUtc,
       endToEndMs: performance.now() - startedMs,
-      merkleBatchCountBefore: countBefore,
-      merkleBatchCountAfter: countAfter,
+      batchCountBefore: countBefore,
+      batchCountAfter: countAfter,
     });
   }
 
@@ -239,14 +268,15 @@ export async function runSepoliaMatchedBenchmark(
 
   const result: SepoliaMatchedHardhatResult = {
     schemaVersion: 1,
-    artifactKind: "bidsphere-sepolia-matched-hardhat",
+    kind: "hardhat-sepolia-matched",
+    status: "completed",
     seriesId: benchmarkSeriesId,
     startedAtUtc,
     completedAtUtc: new Date().toISOString(),
     network: "hardhat",
     chainId: 31_337,
     codeVersion,
-    storageTopology: "one-long-lived-contract-per-strategy",
+    topology: "one-long-lived-contract-per-strategy",
     runtime: {
       node: process.version,
       hardhat: require("hardhat/package.json").version,
@@ -254,6 +284,7 @@ export async function runSepoliaMatchedBenchmark(
         version: "0.8.19",
         optimizerEnabled: false,
         optimizerRuns: 200,
+        evmVersion: "paris",
       },
     },
     deployedBytecodeKeccak256: expectedBytecodeHash,
@@ -283,15 +314,17 @@ export async function runSepoliaMatchedBenchmark(
 }
 
 async function main(): Promise<void> {
-  const outputPath = process.env.HARDHAT_MATCHED_BENCHMARK_OUTPUT?.trim();
-  const codeVersion = process.env.HARDHAT_MATCHED_BENCHMARK_CODE_VERSION?.trim();
-  if (!outputPath || !codeVersion) {
-    throw new Error(
-      "HARDHAT_MATCHED_BENCHMARK_OUTPUT and HARDHAT_MATCHED_BENCHMARK_CODE_VERSION are required"
-    );
-  }
-  const result = await runSepoliaMatchedBenchmark(outputPath, codeVersion);
-  console.log(JSON.stringify({ seriesId: result.seriesId, outputPath: resolve(outputPath) }));
+  const codeVersion = process.env.GAS_BENCHMARK_COMMIT?.trim();
+  if (!codeVersion) throw new Error("GAS_BENCHMARK_COMMIT is required");
+  const benchmarkSeriesId = seriesId();
+  const configuredOutput = process.env.HARDHAT_MATCHED_BENCHMARK_OUTPUT?.trim();
+  const rawPath = configuredOutput
+    ? resolve(configuredOutput)
+    : defaultMatchedBenchmarkOutputPath(benchmarkSeriesId);
+  await runSepoliaMatchedBenchmark(rawPath, codeVersion, benchmarkSeriesId);
+  const checksumPath = `${rawPath}.sha256`;
+  const sha256 = (await readFile(checksumPath, "utf8")).trim();
+  console.log(JSON.stringify({ rawPath, checksumPath, sha256 }));
 }
 
 if (require.main === module) {

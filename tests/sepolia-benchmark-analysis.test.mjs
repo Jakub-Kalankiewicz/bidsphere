@@ -249,20 +249,22 @@ function createMatchedRaw(codeVersion = "0123456789abcdef0123456789abcdef0123456
     const merkle = record.kind === "merkle-registration";
     return {
       ...record,
-      merkleBatchCountBefore: merkle ? record.round : null,
-      merkleBatchCountAfter: merkle ? record.round + 1 : null,
+      contractAddress: original.contractAddresses[record.strategy],
+      batchCountBefore: merkle ? record.round : null,
+      batchCountAfter: merkle ? record.round + 1 : null,
     };
   });
   return {
     schemaVersion: 1,
-    artifactKind: "bidsphere-sepolia-matched-hardhat",
+    kind: "hardhat-sepolia-matched",
+    status: "completed",
     seriesId: original.seriesId,
     startedAtUtc: original.startedAtUtc,
     completedAtUtc: original.completedAtUtc,
     network: "hardhat",
     chainId: 31337,
     codeVersion,
-    storageTopology: "one-long-lived-contract-per-strategy",
+    topology: "one-long-lived-contract-per-strategy",
     runtime: {
       node: "v24.19.0",
       hardhat: "2.28.6",
@@ -270,6 +272,7 @@ function createMatchedRaw(codeVersion = "0123456789abcdef0123456789abcdef0123456
         version: "0.8.19",
         optimizerEnabled: false,
         optimizerRuns: 200,
+        evmVersion: "paris",
       },
     },
     deployedBytecodeKeccak256: `0x${"ab".repeat(32)}`,
@@ -306,6 +309,7 @@ test("validates the matched long-lived topology and emits exact five-observation
 
   assert.equal(summary.localReference.seriesId, local.seriesId);
   assert.equal(summary.localReference.sha256, "a".repeat(64));
+  assert.equal(summary.localReference.topology, "one-long-lived-contract-per-strategy");
   assert.deepEqual(summary.individual.totalGas.observations, ["940000", "942130", "950000", "930000", "945000"]);
   assert.deepEqual(summary.individual.totalGas.statistics, {
     count: 5,
@@ -333,12 +337,21 @@ test("rejects non-matched local evidence, broken counters, and code-version mism
   assert.throws(() => validateCompletedMatchedHardhatResult(wrongChain), /chain ID/i);
 
   const wrongTopology = createMatchedRaw();
-  wrongTopology.storageTopology = "fresh-contract-per-repetition";
+  wrongTopology.topology = "fresh-contract-per-repetition";
   assert.throws(() => validateCompletedMatchedHardhatResult(wrongTopology), /storage topology/i);
 
   const wrongCounter = createMatchedRaw();
-  wrongCounter.transactions.find((record) => record.operationId === "merkle:3").merkleBatchCountBefore = 0;
+  wrongCounter.transactions.find((record) => record.operationId === "merkle:3").batchCountBefore = 0;
   assert.throws(() => validateCompletedMatchedHardhatResult(wrongCounter), /batch count/i);
+
+  const wrongAddress = createMatchedRaw();
+  wrongAddress.transactions.find((record) => record.operationId === "individual:1:0").contractAddress =
+    wrongAddress.contractAddresses.merkle;
+  assert.throws(() => validateCompletedMatchedHardhatResult(wrongAddress), /contract address/i);
+
+  const wrongGasLimit = createMatchedRaw();
+  wrongGasLimit.transactions.find((record) => record.operationId === "individual:1:0").gasLimit = "149999";
+  assert.throws(() => validateCompletedMatchedHardhatResult(wrongGasLimit), /topology/i);
 
   const local = createMatchedRaw("1111111111111111111111111111111111111111");
   const publicRaw = { ...createCompletedRaw(), codeVersion: "2222222222222222222222222222222222222222" };

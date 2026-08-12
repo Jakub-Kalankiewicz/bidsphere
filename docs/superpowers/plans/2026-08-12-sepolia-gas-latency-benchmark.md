@@ -517,6 +517,12 @@ final JSON and its exact-byte sibling SHA-256. Its focused real-contract tests
 must isolate the exact 17,100-gas first-versus-later Merkle counter effect and
 show that equivalent individual registrations have unchanged gas. It does not
 read Sepolia credentials, make network calls, or modify the paid runner.
+It requires `GAS_BENCHMARK_COMMIT`, accepts an optional
+`HARDHAT_MATCHED_BENCHMARK_OUTPUT`, otherwise writes under
+`measurements/raw/hardhat-sepolia-matched/`, and prints the exact raw path,
+checksum path, and digest. Every submitted transaction uses the fixed gas limit
+from the canonical plan and records the actual response gas limit and strategy
+contract address.
 
 **Files:**
 - Create: `scripts/analyze-sepolia-benchmark.mjs`
@@ -532,12 +538,23 @@ Use these analysis contracts:
 ```js
 // Documented shapes; implementation remains plain JavaScript.
 MatchedHardhatReference = {
-  artifactKind: "bidsphere-sepolia-matched-hardhat",
+  kind: "hardhat-sepolia-matched",
+  status: "completed",
   network: "hardhat",
   chainId: 31337,
-  storageTopology: "one-long-lived-contract-per-strategy",
+  topology: "one-long-lived-contract-per-strategy",
   codeVersion: string, // full 40-hex, equal to Sepolia raw
-  transactions: [/* canonical 68 status-one receipts */],
+  runtime: {
+    node: string,
+    hardhat: string,
+    solidityCompiler: {
+      version: "0.8.19",
+      optimizerEnabled: false,
+      optimizerRuns: 200,
+      evmVersion: "paris"
+    }
+  },
+  transactions: [/* canonical 68 status-one receipts with contractAddress */],
   rounds: [/* 12 aggregates */],
   finalMerkleBatchCount: 6
 };
@@ -550,7 +567,7 @@ SourceComparison = {
 
 SepoliaBenchmarkSummary = {
   seriesId: string,
-  localReference: { seriesId: string, sha256: string, storageTopology: string },
+  localReference: { seriesId: string, sha256: string, topology: string },
   generatedAtUtc: string,
   method: "five recorded observations; median and min-max",
   batchSize: 10,
@@ -608,7 +625,15 @@ Validation requires network `sepolia`, chain ID `11155111`, status `completed`, 
 
 - [ ] **Step 5: Implement matched Hardhat reference and source-version limitation**
 
-Validate Hardhat chain 31337, runtime/compiler metadata, deployed-bytecode hash syntax, canonical 68-operation/12-round topology, two addresses, all receipt and aggregate arithmetic, and Merkle counter progression `0 -> 1` through `5 -> 6`. Require the same full code-version identifier as Sepolia. Verify the sibling lowercase SHA-256 against exact JSON bytes. Keep source-comparison booleans, but exclude both commit identifiers from the processed output and never infer deployed Sepolia bytecode identity from source equality.
+Validate Hardhat chain 31337, truthful runtime/compiler metadata including EVM
+version `paris`, deployed-bytecode hash syntax, canonical 68-operation/12-round
+topology, two addresses, every transaction's strategy address and fixed gas
+limit, all receipt and aggregate arithmetic, and Merkle counter progression
+`0 -> 1` through `5 -> 6`. Require the same full code-version identifier as
+Sepolia. Verify the sibling lowercase SHA-256 against exact JSON bytes. Keep
+source-comparison booleans, but exclude both commit identifiers from the
+processed output and never infer deployed Sepolia bytecode identity from source
+equality.
 
 - [ ] **Step 6: Implement the three-path CLI and package scripts**
 
