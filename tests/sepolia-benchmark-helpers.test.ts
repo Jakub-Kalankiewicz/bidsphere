@@ -607,8 +607,57 @@ test("rejects secret-shaped keys and forbidden literal values", () => {
   );
 });
 
+const forbiddenEscapeCases = [
+  { name: "a newline", value: "token\nline" },
+  { name: "a quote", value: 'token"quote' },
+  { name: "a backslash", value: "token\\slash" },
+] as const;
+
+for (const escapeCase of forbiddenEscapeCases) {
+  test(`rejects a forbidden literal containing ${escapeCase.name} in a value`, () => {
+    assert.throws(
+      () =>
+        assertSecretFree(
+          { payload: `prefix-${escapeCase.value}-suffix` },
+          [escapeCase.value]
+        ),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message === "Secret value found" &&
+        !error.message.includes(escapeCase.value)
+    );
+  });
+
+  test(`rejects a forbidden literal containing ${escapeCase.name} in a key`, () => {
+    assert.throws(
+      () =>
+        assertSecretFree(
+          { [`prefix-${escapeCase.value}-suffix`]: "public" },
+          [escapeCase.value]
+        ),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message === "Secret value found" &&
+        !error.message.includes(escapeCase.value)
+    );
+  });
+}
+
 test("accepts a top-level non-serializable value when no secret is present", () => {
   assert.doesNotThrow(() => assertSecretFree(undefined, ["secret"]));
+});
+
+test("accepts nested non-serializable non-secret values", () => {
+  const value = { amount: 1n, callback: () => "public", marker: Symbol("public") };
+
+  assert.doesNotThrow(() => assertSecretFree(value, ["secret"]));
+});
+
+test("accepts a cyclic non-secret object", () => {
+  const value: Record<string, unknown> = { label: "public" };
+  value.self = value;
+
+  assert.doesNotThrow(() => assertSecretFree(value, ["secret"]));
 });
 
 test("builds a secret-free read-only preflight report from public estimates", () => {

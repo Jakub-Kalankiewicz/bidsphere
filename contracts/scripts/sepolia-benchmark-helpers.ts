@@ -797,21 +797,33 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<
 
 export function assertSecretFree(value: unknown, forbiddenValues: readonly string[]): void {
   const forbidden = forbiddenValues.filter((entry) => entry.length > 0);
-  const serialized = JSON.stringify(value) ?? "";
-  if (forbidden.some((entry) => serialized.includes(entry))) {
-    throw new Error("Secret value found");
-  }
+  const visited = new WeakSet<object>();
+
+  const assertNoForbiddenLiteral = (candidate: string): void => {
+    if (forbidden.some((entry) => candidate.includes(entry))) {
+      throw new Error("Secret value found");
+    }
+  };
 
   const visit = (candidate: unknown): void => {
-    if (Array.isArray(candidate)) {
-      candidate.forEach(visit);
-    } else if (candidate !== null && typeof candidate === "object") {
-      for (const [key, child] of Object.entries(candidate)) {
-        if (/private.?key|rpc.?url|BLOCKCHAIN_PRIVATE_KEY|SEPOLIA_RPC_URL/i.test(key)) {
-          throw new Error("Secret-shaped key found");
-        }
-        visit(child);
+    if (typeof candidate === "string") {
+      assertNoForbiddenLiteral(candidate);
+      return;
+    }
+    if (candidate === null || typeof candidate !== "object") {
+      return;
+    }
+    if (visited.has(candidate)) {
+      return;
+    }
+    visited.add(candidate);
+
+    for (const [key, child] of Object.entries(candidate)) {
+      assertNoForbiddenLiteral(key);
+      if (/private.?key|rpc.?url|BLOCKCHAIN_PRIVATE_KEY|SEPOLIA_RPC_URL/i.test(key)) {
+        throw new Error("Secret-shaped key found");
       }
+      visit(child);
     }
   };
   visit(value);
