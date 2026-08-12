@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 export const SEPOLIA_BENCHMARK_CONFIG = Object.freeze({
   batchSize: 10,
@@ -174,6 +174,50 @@ export interface BuildBenchmarkPreflightReportInput {
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+export function createBenchmarkSeriesId(
+  now = new Date(),
+  randomBytesFn: (size: number) => Uint8Array = randomBytes
+): string {
+  const entropy = randomBytesFn(8);
+  if (entropy.byteLength < 8) {
+    throw new Error("Benchmark series IDs require at least 64 bits of entropy");
+  }
+  const filesystemSafeTimestamp = now.toISOString().replace(/[:.]/g, "-");
+  return `sepolia-gas-latency-${filesystemSafeTimestamp}-${Buffer.from(
+    entropy
+  ).toString("hex")}`;
+}
+
+export function recoverSameHashStatusZeroReceipt<
+  T extends { hash: string; status: number | null }
+>(error: unknown, broadcastHash: string): T {
+  if (error !== null && typeof error === "object") {
+    const candidate = error as {
+      code?: unknown;
+      receipt?: unknown;
+    };
+    if (candidate.code === "TRANSACTION_REPLACED") throw error;
+    if (
+      candidate.code === "CALL_EXCEPTION" &&
+      candidate.receipt !== null &&
+      typeof candidate.receipt === "object"
+    ) {
+      const receipt = candidate.receipt as {
+        hash?: unknown;
+        status?: unknown;
+      };
+      if (
+        typeof receipt.hash === "string" &&
+        receipt.hash.toLowerCase() === broadcastHash.toLowerCase() &&
+        receipt.status === 0
+      ) {
+        return candidate.receipt as T;
+      }
+    }
+  }
+  throw error;
 }
 
 export function createBenchmarkModelId(
@@ -584,6 +628,74 @@ export function completeBenchmarkResult(
     )
   ) {
     throw new Error("Completion requires exactly 68 confirmed status-one records");
+  }
+  const { individual, merkle } = result.contractAddresses;
+  if (
+    !individual?.trim() ||
+    !merkle?.trim() ||
+    individual.toLowerCase() === merkle.toLowerCase()
+  ) {
+    throw new Error("Completion requires two distinct non-null contract addresses");
+  }
+
+  const plannedOperationIds = result.plannedOperations.map(
+    (operation) => operation.operationId
+  );
+  const transactionOperationIds = result.transactions.map(
+    (record) => record.operationId
+  );
+  const transactionHashes = result.transactions.map((record) =>
+    record.transactionHash.toLowerCase()
+  );
+  if (
+    result.plannedOperations.length !== 68 ||
+    new Set(plannedOperationIds).size !== 68 ||
+    new Set(transactionOperationIds).size !== 68 ||
+    new Set(transactionHashes).size !== 68
+  ) {
+    throw new Error("Completion operation topology does not match the plan");
+  }
+  const plannedById = new Map(
+    result.plannedOperations.map((operation) => [operation.operationId, operation])
+  );
+  for (const record of result.transactions) {
+    const planned = plannedById.get(record.operationId);
+    if (
+      !planned ||
+      record.kind !== planned.kind ||
+      record.strategy !== planned.strategy ||
+      record.round !== planned.round ||
+      record.warmup !== planned.warmup ||
+      record.sequenceInRound !== planned.sequenceInRound
+    ) {
+      throw new Error("Completion operation topology does not match the plan");
+    }
+  }
+
+  if (result.rounds.length !== 12) {
+    throw new Error("Completion round topology must contain twelve aggregates");
+  }
+  const roundKeys = new Set<string>();
+  for (const round of result.rounds) {
+    const key = `${round.strategy}:${round.round}`;
+    const expectedTransactionCount = round.strategy === "individual" ? 10 : 1;
+    if (
+      round.round < 0 ||
+      round.round >= 6 ||
+      round.warmup !== (round.round === 0) ||
+      round.transactionCount !== expectedTransactionCount ||
+      roundKeys.has(key)
+    ) {
+      throw new Error("Completion round topology does not match the benchmark");
+    }
+    roundKeys.add(key);
+  }
+  for (const strategy of ["individual", "merkle"] as const) {
+    for (let round = 0; round < 6; round += 1) {
+      if (!roundKeys.has(`${strategy}:${round}`)) {
+        throw new Error("Completion round topology does not match the benchmark");
+      }
+    }
   }
 
   return {

@@ -19,8 +19,10 @@ import {
   buildConfirmedTransactionRecord,
   calculateReservedPendingWei,
   completeBenchmarkResult,
+  createBenchmarkSeriesId,
   createInitialBenchmarkResult,
   parseApprovedMaximumWei,
+  recoverSameHashStatusZeroReceipt,
   withTimeout,
   type BenchmarkOperation,
   type BenchmarkTransactionRecord,
@@ -64,10 +66,6 @@ function requiredCodeVersion(value: string | undefined): string {
   return codeVersion;
 }
 
-function uniqueSeries(startedAtUtc: string): string {
-  return `sepolia-gas-latency-${startedAtUtc.replace(/[:.]/g, "-")}`;
-}
-
 function sanitizeErrorMessage(
   error: unknown,
   forbiddenValues: readonly string[]
@@ -83,19 +81,6 @@ function sanitizeErrorMessage(
     .trim()
     .slice(0, 500);
   return message || "Benchmark aborted";
-}
-
-function receiptFromWaitError(error: unknown): TransactionReceipt | null {
-  if (
-    error !== null &&
-    typeof error === "object" &&
-    "receipt" in error &&
-    error.receipt !== null &&
-    typeof error.receipt === "object"
-  ) {
-    return error.receipt as TransactionReceipt;
-  }
-  return null;
 }
 
 function buildPendingTransactionRecord(input: {
@@ -277,7 +262,7 @@ async function main(): Promise<void> {
       process.env.SEPOLIA_BENCHMARK_RPC_PROVIDER_LABEL
     );
     const startedAtUtc = new Date().toISOString();
-    const seriesId = uniqueSeries(startedAtUtc);
+    const seriesId = createBenchmarkSeriesId(new Date(startedAtUtc));
     const operations = buildBenchmarkOperationPlan(seriesId);
     const balanceBeforeWei = await ethers.provider.getBalance(deployer.address);
     outputPath = resolve(
@@ -386,9 +371,10 @@ async function main(): Promise<void> {
           .then(
             (confirmedReceipt) => confirmedReceipt,
             (waitError: unknown) => {
-              const failedReceipt = receiptFromWaitError(waitError);
-              if (failedReceipt) return failedReceipt;
-              throw waitError;
+              return recoverSameHashStatusZeroReceipt<TransactionReceipt>(
+                waitError,
+                broadcast.transaction.hash
+              );
             }
           ),
         SEPOLIA_BENCHMARK_CONFIG.receiptTimeoutMs

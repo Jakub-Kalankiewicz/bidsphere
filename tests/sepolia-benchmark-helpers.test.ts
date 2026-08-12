@@ -13,8 +13,10 @@ import {
   calculateAggregateGasCeiling,
   calculateReservedPendingWei,
   completeBenchmarkResult,
+  createBenchmarkSeriesId,
   createInitialBenchmarkResult,
   parseApprovedMaximumWei,
+  recoverSameHashStatusZeroReceipt,
   withTimeout,
 } from "../contracts/scripts/sepolia-benchmark-helpers.ts";
 import type { BenchmarkTransactionRecord } from "../contracts/scripts/sepolia-benchmark-helpers.ts";
@@ -34,6 +36,32 @@ test("creates unique deterministic 24-character hexadecimal model IDs", () => {
   assert.equal(new Set(ids).size, ids.length);
   assert.ok(ids.every((id) => /^[0-9a-f]{24}$/.test(id)));
   assert.deepEqual(plan, buildBenchmarkOperationPlan("series-fixed"));
+});
+
+test("creates a deterministic filesystem-safe series ID with 64 bits of injected entropy", () => {
+  const seriesId = createBenchmarkSeriesId(
+    new Date("2026-08-12T10:11:12.345Z"),
+    (size) => {
+      assert.equal(size, 8);
+      return Buffer.from("0123456789abcdef", "hex");
+    }
+  );
+
+  assert.equal(
+    seriesId,
+    "sepolia-gas-latency-2026-08-12T10-11-12-345Z-0123456789abcdef"
+  );
+});
+
+test("creates unique formatted series IDs across two calls", () => {
+  const first = createBenchmarkSeriesId();
+  const second = createBenchmarkSeriesId();
+  const expectedFormat =
+    /^sepolia-gas-latency-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f]{16,}$/;
+
+  assert.match(first, expectedFormat);
+  assert.match(second, expectedFormat);
+  assert.notEqual(first, second);
 });
 
 test("derives the exact 16.5 million gas aggregate ceiling", () => {
@@ -121,6 +149,43 @@ test("builds serializable records with monotonic confirmed durations", () => {
     confirmationMs: 1000,
     endToEndMs: 1025,
   });
+});
+
+test("rejects a successful transaction replacement receipt", () => {
+  const replacementError = Object.assign(new Error("transaction replaced"), {
+    code: "TRANSACTION_REPLACED",
+    receipt: { hash: "0xreplacement", status: 1 },
+  });
+
+  assert.throws(
+    () => recoverSameHashStatusZeroReceipt(replacementError, "0xoriginal"),
+    /transaction replaced/
+  );
+});
+
+test("rejects a different-hash status-zero receipt", () => {
+  const waitError = Object.assign(new Error("execution reverted"), {
+    code: "CALL_EXCEPTION",
+    receipt: { hash: "0xdifferent", status: 0 },
+  });
+
+  assert.throws(
+    () => recoverSameHashStatusZeroReceipt(waitError, "0xoriginal"),
+    /execution reverted/
+  );
+});
+
+test("recovers a same-hash status-zero receipt for partial evidence", () => {
+  const receipt = { hash: "0xoriginal", status: 0 };
+  const waitError = Object.assign(new Error("execution reverted"), {
+    code: "CALL_EXCEPTION",
+    receipt,
+  });
+
+  assert.equal(
+    recoverSameHashStatusZeroReceipt(waitError, "0xoriginal"),
+    receipt
+  );
 });
 
 test("aggregates ten confirmed individual transactions into one round", () => {
@@ -245,6 +310,29 @@ function createConfirmedPlanRecords(): BenchmarkTransactionRecord[] {
   );
 }
 
+function createCompletableResult() {
+  const initial = createInitialBenchmarkResult(
+    createResultMetadata(),
+    buildBenchmarkOperationPlan("series-state")
+  );
+  const transactions = createConfirmedPlanRecords();
+  const rounds = (["individual", "merkle"] as const).flatMap((strategy) =>
+    Array.from({ length: 6 }, (_, round) =>
+      aggregateRound(
+        transactions.filter(
+          (record) => record.strategy === strategy && record.round === round
+        )
+      )
+    )
+  );
+  return {
+    ...initial,
+    contractAddresses: { individual: "0x1111", merkle: "0x2222" },
+    transactions,
+    rounds,
+  };
+}
+
 test("creates the serializable running result before any transaction", () => {
   const operations = buildBenchmarkOperationPlan("series-state");
   const result = createInitialBenchmarkResult(createResultMetadata(), operations);
@@ -261,14 +349,8 @@ test("creates the serializable running result before any transaction", () => {
 });
 
 test("completes only 68 successful receipts and derives totals and round aggregates", () => {
-  const initial = createInitialBenchmarkResult(
-    createResultMetadata(),
-    buildBenchmarkOperationPlan("series-state")
-  );
-  const result = completeBenchmarkResult(
-    { ...initial, transactions: createConfirmedPlanRecords() },
-    864n
-  );
+  const completable = createCompletableResult();
+  const result = completeBenchmarkResult(completable, 864n);
 
   assert.equal(result.status, "completed");
   assert.match(result.completedAtUtc ?? "", /^\d{4}-\d{2}-\d{2}T/);
@@ -288,14 +370,111 @@ test("completes only 68 successful receipts and derives totals and round aggrega
   });
 
   assert.throws(
-    () => completeBenchmarkResult({ ...initial, transactions: [] }, 1_000n),
+    () => completeBenchmarkResult({ ...completable, transactions: [] }, 1_000n),
     /68 confirmed status-one/
   );
   const failedRecords = createConfirmedPlanRecords();
   failedRecords[67] = { ...failedRecords[67], receiptStatus: 0 };
   assert.throws(
-    () => completeBenchmarkResult({ ...initial, transactions: failedRecords }, 1_000n),
+    () =>
+      completeBenchmarkResult(
+        { ...completable, transactions: failedRecords },
+        1_000n
+      ),
     /68 confirmed status-one/
+  );
+});
+
+test("rejects duplicate and mismatched completion operations", () => {
+  const completable = createCompletableResult();
+  const duplicateTransactions = [...completable.transactions];
+  duplicateTransactions[67] = {
+    ...duplicateTransactions[67],
+    operationId: duplicateTransactions[0].operationId,
+  };
+  assert.throws(
+    () =>
+      completeBenchmarkResult(
+        { ...completable, transactions: duplicateTransactions },
+        864n
+      ),
+    /operation topology/
+  );
+
+  const missingPlannedOperation = [...completable.plannedOperations];
+  missingPlannedOperation[67] = {
+    ...missingPlannedOperation[67],
+    operationId: "missing:operation",
+  };
+  assert.throws(
+    () =>
+      completeBenchmarkResult(
+        { ...completable, plannedOperations: missingPlannedOperation },
+        864n
+      ),
+    /operation topology/
+  );
+
+  const mismatchedTransactions = [...completable.transactions];
+  mismatchedTransactions[2] = {
+    ...mismatchedTransactions[2],
+    warmup: false,
+  };
+  assert.throws(
+    () =>
+      completeBenchmarkResult(
+        { ...completable, transactions: mismatchedTransactions },
+        864n
+      ),
+    /operation topology/
+  );
+});
+
+test("requires two distinct non-null contract addresses for completion", () => {
+  const completable = createCompletableResult();
+  assert.throws(
+    () =>
+      completeBenchmarkResult(
+        {
+          ...completable,
+          contractAddresses: { individual: null, merkle: "0x2222" },
+        },
+        864n
+      ),
+    /contract addresses/
+  );
+  assert.throws(
+    () =>
+      completeBenchmarkResult(
+        {
+          ...completable,
+          contractAddresses: { individual: "0xABCD", merkle: "0xabcd" },
+        },
+        864n
+      ),
+    /contract addresses/
+  );
+});
+
+test("requires all twelve correctly sized round aggregates for completion", () => {
+  const completable = createCompletableResult();
+  assert.throws(
+    () =>
+      completeBenchmarkResult(
+        { ...completable, rounds: completable.rounds.slice(0, 11) },
+        864n
+      ),
+    /round topology/
+  );
+  const malformedRounds = [...completable.rounds];
+  malformedRounds[0] = { ...malformedRounds[0], transactionCount: 9 };
+  assert.throws(
+    () =>
+      completeBenchmarkResult(
+        { ...completable, rounds: malformedRounds },
+        864n
+      ),
+    /round topology/
   );
 });
 
