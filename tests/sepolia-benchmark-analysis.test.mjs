@@ -463,6 +463,27 @@ test("rejects abbreviated identifiers and Git objects that are not commits", () 
   );
 });
 
+test("rejects an annotated-tag object even when it peels to a commit", () => {
+  const directory = mkdtempSync(join(tmpdir(), "bidsphere-source-tag-object-"));
+  execFileSync("git", ["init", "--quiet"], { cwd: directory });
+  execFileSync("git", ["config", "user.name", "Benchmark Test"], { cwd: directory });
+  execFileSync("git", ["config", "user.email", "benchmark@example.invalid"], { cwd: directory });
+  writeFileSync(join(directory, "tracked.txt"), "tracked\n");
+  execFileSync("git", ["add", "tracked.txt"], { cwd: directory });
+  execFileSync("git", ["commit", "--quiet", "-m", "initial"], { cwd: directory });
+  const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8" }).trim();
+  execFileSync("git", ["tag", "-a", "benchmark-tag", "-m", "annotated benchmark tag"], { cwd: directory });
+  const tagObject = execFileSync("git", ["rev-parse", "benchmark-tag"], {
+    cwd: directory,
+    encoding: "utf8",
+  }).trim();
+
+  assert.throws(
+    () => compareRelevantContractSource(directory, tagObject, commit),
+    /commit object/i
+  );
+});
+
 test("CLI rejects any argument count other than exactly three paths", () => {
   for (const args of [[], ["one", "two"], ["one", "two", "three", "four"]]) {
     const result = spawnSync(process.execPath, [analyzerPath, ...args], { encoding: "utf8" });

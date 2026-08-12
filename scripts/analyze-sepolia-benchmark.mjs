@@ -425,6 +425,14 @@ function resolveCommit(repositoryPath, identifier, label) {
     throw new Error(`${label} must be a full 40-character hexadecimal commit identifier`);
   }
   try {
+    const objectType = execFileSync(
+      "git",
+      ["cat-file", "-t", identifier],
+      { cwd: repositoryPath, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
+    ).trim();
+    if (objectType !== "commit") {
+      throw new Error(`${label} does not name a commit object`);
+    }
     return execFileSync(
       "git",
       ["rev-parse", "--verify", `${identifier}^{commit}`],
