@@ -630,17 +630,21 @@ export function completeBenchmarkResult(
     throw new Error("Completion requires exactly 68 confirmed status-one records");
   }
   const { individual, merkle } = result.contractAddresses;
+  const ethereumAddressPattern = /^0x[0-9a-fA-F]{40}$/;
+  const zeroAddress = "0x0000000000000000000000000000000000000000";
   if (
-    !individual?.trim() ||
-    !merkle?.trim() ||
+    !individual ||
+    !merkle ||
+    !ethereumAddressPattern.test(individual) ||
+    !ethereumAddressPattern.test(merkle) ||
+    individual.toLowerCase() === zeroAddress ||
+    merkle.toLowerCase() === zeroAddress ||
     individual.toLowerCase() === merkle.toLowerCase()
   ) {
-    throw new Error("Completion requires two distinct non-null contract addresses");
+    throw new Error("Completion requires two valid nonzero distinct contract addresses");
   }
 
-  const plannedOperationIds = result.plannedOperations.map(
-    (operation) => operation.operationId
-  );
+  const canonicalOperations = buildBenchmarkOperationPlan(result.seriesId);
   const transactionOperationIds = result.transactions.map(
     (record) => record.operationId
   );
@@ -649,34 +653,47 @@ export function completeBenchmarkResult(
   );
   if (
     result.plannedOperations.length !== 68 ||
-    new Set(plannedOperationIds).size !== 68 ||
     new Set(transactionOperationIds).size !== 68 ||
     new Set(transactionHashes).size !== 68
   ) {
     throw new Error("Completion operation topology does not match the plan");
   }
-  const plannedById = new Map(
-    result.plannedOperations.map((operation) => [operation.operationId, operation])
-  );
-  for (const record of result.transactions) {
-    const planned = plannedById.get(record.operationId);
+  for (const [index, canonical] of canonicalOperations.entries()) {
+    const planned = result.plannedOperations[index];
+    const record = result.transactions[index];
+    const plannedModelIdsMatch =
+      planned.modelIds.length === canonical.modelIds.length &&
+      planned.modelIds.every(
+        (modelId, modelIndex) => modelId === canonical.modelIds[modelIndex]
+      );
     if (
-      !planned ||
-      record.kind !== planned.kind ||
-      record.strategy !== planned.strategy ||
-      record.round !== planned.round ||
-      record.warmup !== planned.warmup ||
-      record.sequenceInRound !== planned.sequenceInRound
+      planned.operationId !== canonical.operationId ||
+      planned.kind !== canonical.kind ||
+      planned.strategy !== canonical.strategy ||
+      planned.round !== canonical.round ||
+      planned.warmup !== canonical.warmup ||
+      planned.sequenceInRound !== canonical.sequenceInRound ||
+      !plannedModelIdsMatch ||
+      planned.merkleRoot !== canonical.merkleRoot ||
+      planned.gasLimit !== canonical.gasLimit.toString() ||
+      record.operationId !== canonical.operationId ||
+      record.kind !== canonical.kind ||
+      record.strategy !== canonical.strategy ||
+      record.round !== canonical.round ||
+      record.warmup !== canonical.warmup ||
+      record.sequenceInRound !== canonical.sequenceInRound ||
+      record.gasLimit !== canonical.gasLimit.toString()
     ) {
       throw new Error("Completion operation topology does not match the plan");
     }
   }
 
-  if (result.rounds.length !== 12) {
+  const progress = deriveBenchmarkProgress(result);
+  if (progress.rounds.length !== 12) {
     throw new Error("Completion round topology must contain twelve aggregates");
   }
   const roundKeys = new Set<string>();
-  for (const round of result.rounds) {
+  for (const round of progress.rounds) {
     const key = `${round.strategy}:${round.round}`;
     const expectedTransactionCount = round.strategy === "individual" ? 10 : 1;
     if (
@@ -700,7 +717,7 @@ export function completeBenchmarkResult(
 
   return {
     ...result,
-    ...deriveBenchmarkProgress(result),
+    ...progress,
     status: "completed",
     abortReason: null,
     completedAtUtc: new Date().toISOString(),

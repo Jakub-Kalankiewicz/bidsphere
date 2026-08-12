@@ -327,7 +327,10 @@ function createCompletableResult() {
   );
   return {
     ...initial,
-    contractAddresses: { individual: "0x1111", merkle: "0x2222" },
+    contractAddresses: {
+      individual: "0x1111111111111111111111111111111111111111",
+      merkle: "0x2222222222222222222222222222222222222222",
+    },
     transactions,
     rounds,
   };
@@ -430,14 +433,64 @@ test("rejects duplicate and mismatched completion operations", () => {
   );
 });
 
-test("requires two distinct non-null contract addresses for completion", () => {
+test("rejects a self-consistently altered plan and record pair", () => {
+  const completable = createCompletableResult();
+  const plannedOperations = [...completable.plannedOperations];
+  const transactions = [...completable.transactions];
+  plannedOperations[2] = { ...plannedOperations[2], kind: "deployment" };
+  transactions[2] = { ...transactions[2], kind: "deployment" };
+
+  assert.throws(
+    () =>
+      completeBenchmarkResult(
+        { ...completable, plannedOperations, transactions },
+        864n
+      ),
+    /operation topology/
+  );
+});
+
+test("requires transaction records in canonical operation order", () => {
+  const completable = createCompletableResult();
+
+  assert.throws(
+    () =>
+      completeBenchmarkResult(
+        { ...completable, transactions: [...completable.transactions].reverse() },
+        864n
+      ),
+    /operation topology/
+  );
+});
+
+test("rejects relabeled operations that would derive a 9-to-2 round split", () => {
+  const completable = createCompletableResult();
+  const plannedOperations = [...completable.plannedOperations];
+  const transactions = [...completable.transactions];
+  plannedOperations[11] = { ...plannedOperations[11], strategy: "merkle" };
+  transactions[11] = { ...transactions[11], strategy: "merkle" };
+
+  assert.throws(
+    () =>
+      completeBenchmarkResult(
+        { ...completable, plannedOperations, transactions },
+        864n
+      ),
+    /operation topology|round topology/
+  );
+});
+
+test("requires valid nonzero distinct contract addresses for completion", () => {
   const completable = createCompletableResult();
   assert.throws(
     () =>
       completeBenchmarkResult(
         {
           ...completable,
-          contractAddresses: { individual: null, merkle: "0x2222" },
+          contractAddresses: {
+            individual: null,
+            merkle: "0x2222222222222222222222222222222222222222",
+          },
         },
         864n
       ),
@@ -448,7 +501,38 @@ test("requires two distinct non-null contract addresses for completion", () => {
       completeBenchmarkResult(
         {
           ...completable,
-          contractAddresses: { individual: "0xABCD", merkle: "0xabcd" },
+          contractAddresses: {
+            individual: "0xABCDEFabcdefABCDEFabcdefABCDEFabcdefABCD",
+            merkle: "0xabcdefABCDEFabcdefABCDEFabcdefABCDEFabcd",
+          },
+        },
+        864n
+      ),
+    /contract addresses/
+  );
+  assert.throws(
+    () =>
+      completeBenchmarkResult(
+        {
+          ...completable,
+          contractAddresses: {
+            individual: "0x1234",
+            merkle: "0x2222222222222222222222222222222222222222",
+          },
+        },
+        864n
+      ),
+    /contract addresses/
+  );
+  assert.throws(
+    () =>
+      completeBenchmarkResult(
+        {
+          ...completable,
+          contractAddresses: {
+            individual: "0x0000000000000000000000000000000000000000",
+            merkle: "0x2222222222222222222222222222222222222222",
+          },
         },
         864n
       ),
@@ -456,26 +540,23 @@ test("requires two distinct non-null contract addresses for completion", () => {
   );
 });
 
-test("requires all twelve correctly sized round aggregates for completion", () => {
+test("derives twelve correctly sized round aggregates instead of trusting input", () => {
   const completable = createCompletableResult();
-  assert.throws(
-    () =>
-      completeBenchmarkResult(
-        { ...completable, rounds: completable.rounds.slice(0, 11) },
-        864n
-      ),
-    /round topology/
+  const missingInputRound = completeBenchmarkResult(
+    { ...completable, rounds: completable.rounds.slice(0, 11) },
+    864n
   );
   const malformedRounds = [...completable.rounds];
   malformedRounds[0] = { ...malformedRounds[0], transactionCount: 9 };
-  assert.throws(
-    () =>
-      completeBenchmarkResult(
-        { ...completable, rounds: malformedRounds },
-        864n
-      ),
-    /round topology/
+  const malformedInputRound = completeBenchmarkResult(
+    { ...completable, rounds: malformedRounds },
+    864n
   );
+
+  assert.equal(missingInputRound.rounds.length, 12);
+  assert.equal(missingInputRound.rounds[0].transactionCount, 10);
+  assert.equal(malformedInputRound.rounds.length, 12);
+  assert.equal(malformedInputRound.rounds[0].transactionCount, 10);
 });
 
 test("aborts while preserving confirmed totals and pending reservation", () => {
