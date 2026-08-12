@@ -10,6 +10,7 @@ const EXPECTED_RECORDED_ROUNDS = 5;
 const EXPECTED_TOTAL_ROUNDS = 6;
 const EXPECTED_TRANSACTION_COUNT = 68;
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
+const FULL_COMMIT_PATTERN = /^[0-9a-fA-F]{40}$/;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 function fail(message) {
@@ -419,15 +420,32 @@ export function parseLocalBatchTenCsv(csvText) {
   };
 }
 
-export function compareRelevantContractSource(repositoryPath, localCommit, sepoliaCommit) {
-  if (![repositoryPath, localCommit, sepoliaCommit].every((value) => typeof value === "string" && value.length > 0)) {
-    throw new Error("Repository path and both code-version identifiers are required");
+function resolveCommit(repositoryPath, identifier, label) {
+  if (typeof identifier !== "string" || !FULL_COMMIT_PATTERN.test(identifier)) {
+    throw new Error(`${label} must be a full 40-character hexadecimal commit identifier`);
   }
+  try {
+    return execFileSync(
+      "git",
+      ["rev-parse", "--verify", `${identifier}^{commit}`],
+      { cwd: repositoryPath, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
+    ).trim();
+  } catch (error) {
+    throw new Error(`${label} must resolve to a commit object`, { cause: error });
+  }
+}
+
+export function compareRelevantContractSource(repositoryPath, localCommit, sepoliaCommit) {
+  if (typeof repositoryPath !== "string" || repositoryPath.length === 0) {
+    throw new Error("Repository path is required");
+  }
+  const resolvedLocalCommit = resolveCommit(repositoryPath, localCommit, "Local code-version identifier");
+  const resolvedSepoliaCommit = resolveCommit(repositoryPath, sepoliaCommit, "Sepolia code-version identifier");
   let modelRegistrySourceUnchanged;
   try {
     execFileSync(
       "git",
-      ["diff", "--quiet", localCommit, sepoliaCommit, "--", "contracts/contracts/ModelRegistry.sol"],
+      ["diff", "--quiet", "--no-ext-diff", resolvedLocalCommit, resolvedSepoliaCommit, "--", "contracts/contracts/ModelRegistry.sol"],
       { cwd: repositoryPath, stdio: ["ignore", "ignore", "pipe"] }
     );
     modelRegistrySourceUnchanged = true;
@@ -439,7 +457,7 @@ export function compareRelevantContractSource(repositoryPath, localCommit, sepol
     }
   }
   return {
-    codeVersionIdentifiersMatch: localCommit === sepoliaCommit,
+    codeVersionIdentifiersMatch: resolvedLocalCommit === resolvedSepoliaCommit,
     modelRegistrySourceUnchanged,
     bytecodeIdentityClaimed: false,
   };

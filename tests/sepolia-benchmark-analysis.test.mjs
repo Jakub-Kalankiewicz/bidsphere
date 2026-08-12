@@ -394,7 +394,73 @@ test("distinguishes unchanged source, a real diff, and git command errors", () =
     modelRegistrySourceUnchanged: false,
     bytecodeIdentityClaimed: false,
   });
-  assert.throws(() => compareRelevantContractSource(directory, first, "missing-commit"), /git diff/i);
+  assert.throws(
+    () => compareRelevantContractSource(directory, first, "0000000000000000000000000000000000000000"),
+    /commit object/i
+  );
+});
+
+test("rejects option-like code versions without creating an attacker-selected file", () => {
+  const directory = mkdtempSync(join(tmpdir(), "bidsphere-source-option-create-"));
+  execFileSync("git", ["init", "--quiet"], { cwd: directory });
+  execFileSync("git", ["config", "user.name", "Benchmark Test"], { cwd: directory });
+  execFileSync("git", ["config", "user.email", "benchmark@example.invalid"], { cwd: directory });
+  writeFileSync(join(directory, "tracked.txt"), "tracked\n");
+  execFileSync("git", ["add", "tracked.txt"], { cwd: directory });
+  execFileSync("git", ["commit", "--quiet", "-m", "initial"], { cwd: directory });
+  const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8" }).trim();
+  const injectedOutput = join(directory, "must-not-exist.txt");
+
+  assert.throws(
+    () => compareRelevantContractSource(directory, `--output=${injectedOutput}`, commit),
+    /full 40-character hexadecimal commit/i
+  );
+  assert.equal(existsSync(injectedOutput), false);
+});
+
+test("rejects option-like code versions without truncating an existing file", () => {
+  const directory = mkdtempSync(join(tmpdir(), "bidsphere-source-option-truncate-"));
+  execFileSync("git", ["init", "--quiet"], { cwd: directory });
+  execFileSync("git", ["config", "user.name", "Benchmark Test"], { cwd: directory });
+  execFileSync("git", ["config", "user.email", "benchmark@example.invalid"], { cwd: directory });
+  writeFileSync(join(directory, "tracked.txt"), "tracked\n");
+  execFileSync("git", ["add", "tracked.txt"], { cwd: directory });
+  execFileSync("git", ["commit", "--quiet", "-m", "initial"], { cwd: directory });
+  const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8" }).trim();
+  const injectedOutput = join(directory, "must-remain.txt");
+  const sentinel = "do not truncate this file\n";
+  writeFileSync(injectedOutput, sentinel);
+
+  assert.throws(
+    () => compareRelevantContractSource(directory, commit, `--output=${injectedOutput}`),
+    /full 40-character hexadecimal commit/i
+  );
+  assert.equal(readFileSync(injectedOutput, "utf8"), sentinel);
+});
+
+test("rejects abbreviated identifiers and Git objects that are not commits", () => {
+  const directory = mkdtempSync(join(tmpdir(), "bidsphere-source-object-type-"));
+  execFileSync("git", ["init", "--quiet"], { cwd: directory });
+  execFileSync("git", ["config", "user.name", "Benchmark Test"], { cwd: directory });
+  execFileSync("git", ["config", "user.email", "benchmark@example.invalid"], { cwd: directory });
+  const trackedPath = join(directory, "tracked.txt");
+  writeFileSync(trackedPath, "tracked\n");
+  execFileSync("git", ["add", "tracked.txt"], { cwd: directory });
+  execFileSync("git", ["commit", "--quiet", "-m", "initial"], { cwd: directory });
+  const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8" }).trim();
+  const blob = execFileSync("git", ["hash-object", "-w", "tracked.txt"], {
+    cwd: directory,
+    encoding: "utf8",
+  }).trim();
+
+  assert.throws(
+    () => compareRelevantContractSource(directory, commit.slice(0, 12), commit),
+    /full 40-character hexadecimal commit/i
+  );
+  assert.throws(
+    () => compareRelevantContractSource(directory, blob, commit),
+    /commit object/i
+  );
 });
 
 test("CLI rejects any argument count other than exactly three paths", () => {
