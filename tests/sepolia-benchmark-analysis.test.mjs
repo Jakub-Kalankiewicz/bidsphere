@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -51,6 +51,38 @@ const LOCAL_CSV = `timestamp,commit,network,batch_size,repetition,individual_tot
 2026-01-01T00:00:30Z,local-commit,hardhat,10,30,942160,587721,94216,58772.1,24
 2026-01-01T00:00:31Z,ignored,hardhat,5,1,1,1,0.2,0.2,24
 2026-01-01T00:00:32Z,ignored,sepolia,10,1,1,1,0.1,0.1,24`;
+
+const UNREPRESENTABLE_HALF_MEDIAN_CSV = `commit,network,batch_size,individual_total_gas,merkle_batch_gas
+edge-commit,hardhat,10,1,1
+edge-commit,hardhat,10,2,2
+edge-commit,hardhat,10,3,3
+edge-commit,hardhat,10,4,4
+edge-commit,hardhat,10,5,5
+edge-commit,hardhat,10,6,6
+edge-commit,hardhat,10,7,7
+edge-commit,hardhat,10,8,8
+edge-commit,hardhat,10,9,9
+edge-commit,hardhat,10,10,10
+edge-commit,hardhat,10,11,11
+edge-commit,hardhat,10,12,12
+edge-commit,hardhat,10,13,13
+edge-commit,hardhat,10,14,14
+edge-commit,hardhat,10,9007199254740990,9007199254740990
+edge-commit,hardhat,10,9007199254740991,9007199254740991
+edge-commit,hardhat,10,9007199254740991,9007199254740991
+edge-commit,hardhat,10,9007199254740991,9007199254740991
+edge-commit,hardhat,10,9007199254740991,9007199254740991
+edge-commit,hardhat,10,9007199254740991,9007199254740991
+edge-commit,hardhat,10,9007199254740991,9007199254740991
+edge-commit,hardhat,10,9007199254740991,9007199254740991
+edge-commit,hardhat,10,9007199254740991,9007199254740991
+edge-commit,hardhat,10,9007199254740991,9007199254740991
+edge-commit,hardhat,10,9007199254740991,9007199254740991
+edge-commit,hardhat,10,9007199254740991,9007199254740991
+edge-commit,hardhat,10,9007199254740991,9007199254740991
+edge-commit,hardhat,10,9007199254740991,9007199254740991
+edge-commit,hardhat,10,9007199254740991,9007199254740991
+edge-commit,hardhat,10,9007199254740991,9007199254740991`;
 
 const INDIVIDUAL_ROUND_GAS = [900000, 940000, 942130, 950000, 930000, 945000];
 const MERKLE_ROUND_GAS = [600000, 580000, 587661, 590000, 570000, 600000];
@@ -231,6 +263,23 @@ test("parses exactly thirty local Hardhat batch-ten rows by header name", () => 
   assert.throws(() => parseLocalBatchTenCsv(LOCAL_CSV.replace("hardhat,10,30", "hardhat,5,30")), /exactly 30/);
 });
 
+test("rejects an exact half-integer CSV median that Number cannot represent", () => {
+  assert.throws(
+    () => parseLocalBatchTenCsv(UNREPRESENTABLE_HALF_MEDIAN_CSV),
+    /median.*exactly represented|exactly represent.*median/i
+  );
+});
+
+test("returns an exactly representable half-integer CSV median as a number", () => {
+  const representable = parseLocalBatchTenCsv(
+    UNREPRESENTABLE_HALF_MEDIAN_CSV
+      .replaceAll("9007199254740990", "100")
+      .replaceAll("9007199254740991", "101")
+  );
+  assert.equal(representable.individualTotalGasMedian, 100.5);
+  assert.equal(representable.merkleBatchGasMedian, 100.5);
+});
+
 test("validates raw arithmetic and excludes the warm-up from five-value summaries", () => {
   const raw = createCompletedRaw();
   const localReference = parseLocalBatchTenCsv(LOCAL_CSV);
@@ -353,6 +402,29 @@ test("CLI rejects any argument count other than exactly three paths", () => {
     const result = spawnSync(process.execPath, [analyzerPath, ...args], { encoding: "utf8" });
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /exactly three paths/i);
+  }
+});
+
+test("CLI rejects resolved and symlink output aliases before reading or writing sources", () => {
+  const directory = mkdtempSync(join(tmpdir(), "bidsphere-analysis-alias-"));
+  const rawPath = join(directory, "raw.json");
+  const csvPath = join(directory, "local.csv");
+  const symlinkPath = join(directory, "raw-alias.json");
+  const rawBytes = "immutable raw benchmark bytes\n";
+  const csvBytes = "immutable local CSV bytes\n";
+  writeFileSync(rawPath, rawBytes);
+  writeFileSync(csvPath, csvBytes);
+  symlinkSync(rawPath, symlinkPath);
+
+  for (const outputPath of [rawPath, csvPath, symlinkPath]) {
+    const result = spawnSync(process.execPath, [analyzerPath, rawPath, csvPath, outputPath], {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /three distinct paths|path alias/i);
+    assert.equal(readFileSync(rawPath, "utf8"), rawBytes);
+    assert.equal(readFileSync(csvPath, "utf8"), csvBytes);
   }
 });
 

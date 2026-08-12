@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -353,10 +353,34 @@ function parseCsv(csvText) {
   return rows;
 }
 
-function median(values) {
-  const sorted = [...values].sort((left, right) => left - right);
+function exactBigIntMedian(values) {
+  const sorted = [...values].sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
   const middle = sorted.length / 2;
-  return (sorted[middle - 1] + sorted[middle]) / 2;
+  const doubledMedian = sorted[middle - 1] + sorted[middle];
+  const floor = doubledMedian / 2n;
+  const floorNumber = Number(floor);
+
+  if (doubledMedian % 2n === 0n) {
+    if (!Number.isSafeInteger(floorNumber) || BigInt(floorNumber) !== floor) {
+      throw new Error("Local benchmark CSV median cannot be exactly represented as a JavaScript number");
+    }
+    return floorNumber;
+  }
+
+  const ceil = floor + 1n;
+  const ceilNumber = Number(ceil);
+  const candidate = floorNumber + 0.5;
+  if (
+    !Number.isSafeInteger(floorNumber) ||
+    !Number.isSafeInteger(ceilNumber) ||
+    BigInt(floorNumber) !== floor ||
+    BigInt(ceilNumber) !== ceil ||
+    candidate - floorNumber !== 0.5 ||
+    ceilNumber - candidate !== 0.5
+  ) {
+    throw new Error("Local benchmark CSV median cannot be exactly represented as a JavaScript number");
+  }
+  return candidate;
 }
 
 export function parseLocalBatchTenCsv(csvText) {
@@ -381,17 +405,17 @@ export function parseLocalBatchTenCsv(csvText) {
   const parseGas = (fields, headerName) => {
     const value = fields[indexes[headerName]];
     if (!/^\d+$/.test(value)) throw new Error(`${headerName} must contain positive integers`);
-    const number = Number(value);
-    if (!Number.isSafeInteger(number) || number <= 0) throw new Error(`${headerName} must contain positive safe integers`);
-    return number;
+    const integer = BigInt(value);
+    if (integer <= 0n) throw new Error(`${headerName} must contain positive integers`);
+    return integer;
   };
   return {
     network: "hardhat",
     batchSize: 10,
     rows: 30,
     codeVersion: [...codeVersions][0],
-    individualTotalGasMedian: median(matching.map((fields) => parseGas(fields, "individual_total_gas"))),
-    merkleBatchGasMedian: median(matching.map((fields) => parseGas(fields, "merkle_batch_gas"))),
+    individualTotalGasMedian: exactBigIntMedian(matching.map((fields) => parseGas(fields, "individual_total_gas"))),
+    merkleBatchGasMedian: exactBigIntMedian(matching.map((fields) => parseGas(fields, "merkle_batch_gas"))),
   };
 }
 
@@ -505,6 +529,22 @@ export async function main(args = process.argv.slice(2)) {
   const rawPath = resolve(rawArgument);
   const localPath = resolve(localArgument);
   const outputPath = resolve(outputArgument);
+  const resolvedPaths = [rawPath, localPath, outputPath];
+  if (new Set(resolvedPaths).size !== resolvedPaths.length) {
+    throw new Error("Analysis requires three distinct paths; path aliases are not allowed");
+  }
+  const canonicalPaths = await Promise.all(resolvedPaths.map(async (path) => {
+    try {
+      return await realpath(path);
+    } catch (error) {
+      if (error && typeof error === "object" && error.code === "ENOENT") return null;
+      throw error;
+    }
+  }));
+  const existingCanonicalPaths = canonicalPaths.filter((path) => path !== null);
+  if (new Set(existingCanonicalPaths).size !== existingCanonicalPaths.length) {
+    throw new Error("Analysis requires three distinct paths; path aliases are not allowed");
+  }
   const raw = JSON.parse(await readFile(rawPath, "utf8"));
   const localReference = parseLocalBatchTenCsv(await readFile(localPath, "utf8"));
   const sourceComparison = compareRelevantContractSource(process.cwd(), localReference.codeVersion, raw.codeVersion);
