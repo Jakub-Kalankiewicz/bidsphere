@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -521,6 +521,19 @@ export function analyzeSepoliaBenchmark(raw, localReference, sourceComparison) {
   };
 }
 
+async function existingOutputEndpoint(path, inspect) {
+  try {
+    return await inspect(path);
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function sameFileIdentity(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
 export async function main(args = process.argv.slice(2)) {
   if (args.length !== 3) {
     throw new Error("Usage requires exactly three paths: <raw-sepolia.json> <local-hardhat.csv> <summary.json>");
@@ -533,17 +546,27 @@ export async function main(args = process.argv.slice(2)) {
   if (new Set(resolvedPaths).size !== resolvedPaths.length) {
     throw new Error("Analysis requires three distinct paths; path aliases are not allowed");
   }
-  const canonicalPaths = await Promise.all(resolvedPaths.map(async (path) => {
-    try {
-      return await realpath(path);
-    } catch (error) {
-      if (error && typeof error === "object" && error.code === "ENOENT") return null;
-      throw error;
-    }
-  }));
+  const canonicalPaths = await Promise.all([
+    realpath(rawPath),
+    realpath(localPath),
+    existingOutputEndpoint(outputPath, realpath),
+  ]);
   const existingCanonicalPaths = canonicalPaths.filter((path) => path !== null);
   if (new Set(existingCanonicalPaths).size !== existingCanonicalPaths.length) {
     throw new Error("Analysis requires three distinct paths; path aliases are not allowed");
+  }
+  const identities = await Promise.all([
+    stat(rawPath, { bigint: true }),
+    stat(localPath, { bigint: true }),
+    existingOutputEndpoint(outputPath, (path) => stat(path, { bigint: true })),
+  ]);
+  for (let left = 0; left < identities.length; left += 1) {
+    if (identities[left] === null) continue;
+    for (let right = left + 1; right < identities.length; right += 1) {
+      if (identities[right] !== null && sameFileIdentity(identities[left], identities[right])) {
+        throw new Error("Analysis requires three distinct paths; path aliases are not allowed");
+      }
+    }
   }
   const raw = JSON.parse(await readFile(rawPath, "utf8"));
   const localReference = parseLocalBatchTenCsv(await readFile(localPath, "utf8"));

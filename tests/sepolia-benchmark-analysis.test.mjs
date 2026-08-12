@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -425,6 +425,30 @@ test("CLI rejects resolved and symlink output aliases before reading or writing 
     assert.match(result.stderr, /three distinct paths|path alias/i);
     assert.equal(readFileSync(rawPath, "utf8"), rawBytes);
     assert.equal(readFileSync(csvPath, "utf8"), csvBytes);
+  }
+});
+
+test("CLI rejects raw and CSV hard-link outputs before reading or writing sources", () => {
+  const directory = mkdtempSync(join(tmpdir(), "bidsphere-analysis-hard-link-"));
+  const rawPath = join(directory, "raw.json");
+  const csvPath = join(directory, "local.csv");
+  const outputPath = join(directory, "summary.json");
+  const rawBytes = "immutable raw hard-link bytes\n";
+  const csvBytes = "immutable CSV hard-link bytes\n";
+  writeFileSync(rawPath, rawBytes);
+  writeFileSync(csvPath, csvBytes);
+
+  for (const sourcePath of [rawPath, csvPath]) {
+    linkSync(sourcePath, outputPath);
+    const result = spawnSync(process.execPath, [analyzerPath, rawPath, csvPath, outputPath], {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /three distinct paths|path alias/i);
+    assert.equal(readFileSync(rawPath, "utf8"), rawBytes);
+    assert.equal(readFileSync(csvPath, "utf8"), csvBytes);
+    unlinkSync(outputPath);
   }
 });
 
