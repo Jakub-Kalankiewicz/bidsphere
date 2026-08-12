@@ -56,6 +56,23 @@ function requireSafeNumber(value, label) {
   return number;
 }
 
+function requireCanonicalSequentialReceipt(
+  { startedOffsetMs, receiptOffsetMs, blockNumber },
+  previous,
+  invalid
+) {
+  if (
+    previous !== null &&
+    startedOffsetMs < previous.receiptOffsetMs
+  ) {
+    invalid("transaction records must have sequential non-overlapping offsets in canonical order");
+  }
+  if (previous !== null && blockNumber < previous.blockNumber) {
+    invalid("receipt block numbers must be nondecreasing in canonical order");
+  }
+  return { receiptOffsetMs, blockNumber };
+}
+
 function expectedTransactionKey(record, invalid = fail) {
   if (record.kind === "deployment") {
     if (
@@ -289,6 +306,7 @@ export function validateCompletedSepoliaResult(rawValue) {
   const operationIds = new Set();
   const transactionHashes = new Set();
   let firstNonce = null;
+  let previousReceipt = null;
 
   for (const [index, transactionValue] of raw.transactions.entries()) {
     const record = requireObject(transactionValue, "transaction record");
@@ -350,6 +368,15 @@ export function validateCompletedSepoliaResult(rawValue) {
     if (submission !== broadcastOffset - startedOffset) fail(`${operationId} submission duration does not match offsets`);
     if (confirmation !== receiptOffset - broadcastOffset) fail(`${operationId} confirmation duration does not match offsets`);
     if (endToEnd !== receiptOffset - startedOffset) fail(`${operationId} end-to-end duration does not match offsets`);
+    previousReceipt = requireCanonicalSequentialReceipt(
+      {
+        startedOffsetMs: startedOffset,
+        receiptOffsetMs: receiptOffset,
+        blockNumber: record.blockNumber,
+      },
+      previousReceipt,
+      fail
+    );
     experimentGas += gasUsed;
     experimentFee += actualFee;
   }
@@ -498,6 +525,7 @@ export function validateCompletedMatchedHardhatResult(rawValue) {
   const transactionHashes = new Set();
   let experimentGas = 0n;
   let experimentFee = 0n;
+  let previousReceipt = null;
   for (const recordValue of raw.transactions) {
     const record = requireObject(recordValue, "matched transaction record");
     if (record.status !== "confirmed" || record.receiptStatus !== 1 || record.confirmationsRequested !== 1) {
@@ -530,6 +558,15 @@ export function validateCompletedMatchedHardhatResult(rawValue) {
     if (endToEnd !== receiptOffset - startedOffset) {
       matchedFail(`${operationId} end-to-end duration does not match offsets`);
     }
+    previousReceipt = requireCanonicalSequentialReceipt(
+      {
+        startedOffsetMs: startedOffset,
+        receiptOffsetMs: receiptOffset,
+        blockNumber: record.blockNumber,
+      },
+      previousReceipt,
+      matchedFail
+    );
     const expectedAddress = raw.contractAddresses[record.strategy];
     if (
       typeof record.contractAddress !== "string" ||

@@ -455,6 +455,7 @@ git commit -m "feat: preflight Sepolia benchmark budget"
 **Files:**
 - Create: `contracts/scripts/sepolia-benchmark.ts`
 - Create: `contracts/scripts/sepolia-benchmark-transaction.ts`
+- Create: `contracts/test/SepoliaBenchmarkRunner.test.ts`
 - Create: `tests/sepolia-benchmark-transaction.test.ts`
 - Modify: `contracts/package.json`
 - Modify: `contracts/scripts/sepolia-benchmark-helpers.ts`
@@ -513,12 +514,12 @@ node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/sepolia-benchma
 cd contracts && npx tsc --noEmit && npm test
 ```
 
-Expected: all Node tests pass, TypeScript exits 0, and Hardhat reports 12 passing tests.
+Expected: all Node tests pass and TypeScript exits 0; record the fresh Hardhat test count from command output rather than predicting it here.
 
 - [ ] **Step 8: Commit the runner without executing Sepolia transactions**
 
 ```bash
-git add contracts/scripts/sepolia-benchmark.ts contracts/scripts/sepolia-benchmark-helpers.ts contracts/package.json tests/sepolia-benchmark-helpers.test.ts
+git add contracts/scripts/sepolia-benchmark.ts contracts/scripts/sepolia-benchmark-helpers.ts contracts/test/SepoliaBenchmarkRunner.test.ts contracts/package.json tests/sepolia-benchmark-helpers.test.ts
 git commit -m "feat: run bounded Sepolia gas latency benchmark"
 ```
 

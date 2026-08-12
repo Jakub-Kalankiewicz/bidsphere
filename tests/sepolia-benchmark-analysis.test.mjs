@@ -497,6 +497,41 @@ test("rejects forged paid and matched round latency independently of UTC timesta
   assert.doesNotThrow(() => validateCompletedSepoliaResult(reversedUtc));
 });
 
+test("rejects overlapping paid and matched receipts and decreasing block order", () => {
+  for (const [label, createRaw, validate] of [
+    ["paid", createCompletedRaw, validateCompletedSepoliaResult],
+    ["matched", createMatchedRaw, validateCompletedMatchedHardhatResult],
+  ]) {
+    const overlapping = createRaw();
+    const record = overlapping.transactions[2];
+    record.startedOffsetMs = 250;
+    record.receiptOffsetMs = 350;
+    record.endToEndMs = 100;
+    if (label === "paid") {
+      record.broadcastOffsetMs = 260;
+      record.submissionMs = 10;
+      record.confirmationMs = 90;
+    }
+    overlapping.rounds.find(
+      (round) => round.strategy === "individual" && round.round === 0
+    ).wallClockMs = 1050;
+    assert.throws(
+      () => validate(overlapping),
+      /sequential.*offset|started offset.*previous receipt/i,
+      `${label} overlap`
+    );
+
+    const decreasingBlock = createRaw();
+    decreasingBlock.transactions[2].blockNumber =
+      decreasingBlock.transactions[1].blockNumber - 1;
+    assert.throws(
+      () => validate(decreasingBlock),
+      /block.*nondecreasing|block.*previous/i,
+      `${label} block order`
+    );
+  }
+});
+
 test("distinguishes unchanged source, a real diff, and git command errors", () => {
   const directory = mkdtempSync(join(tmpdir(), "bidsphere-source-comparison-"));
   execFileSync("git", ["init", "--quiet"], { cwd: directory });
