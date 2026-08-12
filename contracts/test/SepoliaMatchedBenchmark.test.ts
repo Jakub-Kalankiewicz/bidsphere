@@ -1,4 +1,5 @@
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -9,13 +10,24 @@ import * as matchedBenchmark from "../scripts/benchmark-gas-sepolia-matched";
 
 const { runSepoliaMatchedBenchmark } = matchedBenchmark;
 
+function checkedOutHead(): string {
+  return execFileSync("git", ["rev-parse", "--verify", "HEAD^{commit}"], {
+    cwd: join(__dirname, "..", ".."),
+    encoding: "utf8",
+  }).trim();
+}
+
+function differentFullCommitWithSamePrefix(head: string): string {
+  return `${head.slice(0, -1)}${head.endsWith("0") ? "1" : "0"}`;
+}
+
 describe("Sepolia-matched Hardhat benchmark", () => {
   it("replays the 68-operation long-lived storage topology and writes verifiable evidence", async () => {
     const outputPath = join(
       process.env.TMPDIR ?? "/tmp",
       `bidsphere-matched-${Date.now()}.json`
     );
-    const codeVersion = "0123456789abcdef0123456789abcdef01234567";
+    const codeVersion = checkedOutHead();
 
     const result = await runSepoliaMatchedBenchmark(outputPath, codeVersion);
     const rawBytes = await readFile(outputPath);
@@ -110,7 +122,7 @@ describe("Sepolia-matched Hardhat benchmark", () => {
     );
     const env = {
       ...process.env,
-      GAS_BENCHMARK_COMMIT: "0123456789abcdef0123456789abcdef01234567",
+      GAS_BENCHMARK_COMMIT: checkedOutHead(),
       HARDHAT_MATCHED_BENCHMARK_OUTPUT: outputPath,
     };
     delete env.HARDHAT_MATCHED_BENCHMARK_CODE_VERSION;
@@ -132,6 +144,56 @@ describe("Sepolia-matched Hardhat benchmark", () => {
     expect(coordinates.rawPath).to.equal(outputPath);
     expect(coordinates.checksumPath).to.equal(`${outputPath}.sha256`);
     expect(coordinates.sha256).to.match(/^[0-9a-f]{64}$/);
+  });
+
+  it("rejects a different full commit before deployment or artifact output", async () => {
+    const head = checkedOutHead();
+    const wrongCommit = differentFullCommitWithSamePrefix(head);
+    const directOutput = join(
+      process.env.TMPDIR ?? "/tmp",
+      `bidsphere-matched-wrong-direct-${Date.now()}.json`
+    );
+    const blockBefore = await ethers.provider.getBlockNumber();
+    let directError: unknown;
+    try {
+      await runSepoliaMatchedBenchmark(directOutput, wrongCommit);
+    } catch (error) {
+      directError = error;
+    }
+    expect(directError).to.be.instanceOf(Error);
+    expect((directError as Error).message).to.match(/commit|checked-out HEAD/i);
+    expect(await ethers.provider.getBlockNumber()).to.equal(blockBefore);
+    expect(existsSync(directOutput)).to.equal(false);
+    expect(existsSync(`${directOutput}.sha256`)).to.equal(false);
+
+    const cliOutput = join(
+      process.env.TMPDIR ?? "/tmp",
+      `bidsphere-matched-wrong-cli-${Date.now()}.json`
+    );
+    const executed = spawnSync(
+      process.execPath,
+      [
+        join(__dirname, "..", "node_modules", "hardhat", "internal", "cli", "cli.js"),
+        "run",
+        "--no-compile",
+        "scripts/benchmark-gas-sepolia-matched.ts",
+        "--network",
+        "hardhat",
+      ],
+      {
+        cwd: join(__dirname, ".."),
+        env: {
+          ...process.env,
+          GAS_BENCHMARK_COMMIT: wrongCommit,
+          HARDHAT_MATCHED_BENCHMARK_OUTPUT: cliOutput,
+        },
+        encoding: "utf8",
+      }
+    );
+    expect(executed.status).not.to.equal(0);
+    expect(executed.stderr).to.match(/commit|checked-out HEAD/i);
+    expect(existsSync(cliOutput)).to.equal(false);
+    expect(existsSync(`${cliOutput}.sha256`)).to.equal(false);
   });
 
   it("isolates the exact 17100-gas first-write effect for the Merkle batch counter", async () => {

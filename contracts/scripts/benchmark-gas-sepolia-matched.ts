@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -7,10 +8,9 @@ import { artifacts, ethers, network } from "hardhat";
 
 import {
   buildBenchmarkOperationPlan,
+  validateBenchmarkCodeVersion,
   type BenchmarkOperation,
 } from "./sepolia-benchmark-helpers";
-
-const FULL_COMMIT = /^[0-9a-f]{40}$/;
 
 interface MatchedTransactionRecord {
   operationId: string;
@@ -104,6 +104,29 @@ export function defaultMatchedBenchmarkOutputPath(benchmarkSeriesId: string): st
   );
 }
 
+function assertCheckedOutCodeVersion(codeVersion: string): string {
+  const repositoryRoot = resolve(__dirname, "../..");
+  return validateBenchmarkCodeVersion(codeVersion, {
+    objectType: (identifier) => {
+      try {
+        return execFileSync("git", ["cat-file", "-t", identifier], {
+          cwd: repositoryRoot,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      } catch {
+        return "missing";
+      }
+    },
+    headCommit: () =>
+      execFileSync("git", ["rev-parse", "--verify", "HEAD^{commit}"], {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+  });
+}
+
 async function writeAtomicEvidence(
   outputPath: string,
   result: SepoliaMatchedHardhatResult
@@ -149,9 +172,7 @@ export async function runSepoliaMatchedBenchmark(
   codeVersion: string,
   benchmarkSeriesId = seriesId()
 ): Promise<SepoliaMatchedHardhatResult> {
-  if (!FULL_COMMIT.test(codeVersion)) {
-    throw new Error("Matched benchmark code version must be a lowercase full commit identifier");
-  }
+  codeVersion = assertCheckedOutCodeVersion(codeVersion);
   const runtimeNetwork = await ethers.provider.getNetwork();
   if (network.name !== "hardhat" || runtimeNetwork.chainId !== 31_337n) {
     throw new Error("Sepolia-matched reference must run on Hardhat chain 31337");
