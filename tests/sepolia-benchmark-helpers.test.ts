@@ -129,3 +129,7 @@ test("rejects secret-shaped keys and forbidden literal values", () => {
     )
   );
 });
+
+test("accepts a top-level non-serializable value when no secret is present", () => {
+  assert.doesNotThrow(() => assertSecretFree(undefined, ["secret"]));
+});

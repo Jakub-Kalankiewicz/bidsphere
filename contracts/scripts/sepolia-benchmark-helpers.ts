@@ -254,7 +254,7 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<
 
 export function assertSecretFree(value: unknown, forbiddenValues: readonly string[]): void {
   const forbidden = forbiddenValues.filter((entry) => entry.length > 0);
-  const serialized = JSON.stringify(value);
+  const serialized = JSON.stringify(value) ?? "";
   if (forbidden.some((entry) => serialized.includes(entry))) {
     throw new Error("Secret value found");
   }
