@@ -39,7 +39,7 @@
 - Modify `package.json`: include new tests and add the analysis command.
 - Create after execution the canonical raw path returned by `join("measurements/raw/sepolia", `${seriesId}.json`)`, where `seriesId` is generated once as `sepolia-gas-latency-` plus the filesystem-safe UTC timestamp.
 - Create after execution the derived path returned by `join("measurements/processed", `${seriesId}-summary.json`)`.
-- Modify after successful validation `../WUT_Thesis/thesis-work/state.md`, `session-summary.md`, `experiment-protocol.md`, and `remaining-tests-plan.md`: record actual outcome and limitations.
+- Modify after successful validation `/Users/jakub.kalankiewicz/Code/personal/WUT_Thesis/thesis-work/state.md`, `session-summary.md`, `experiment-protocol.md`, and `remaining-tests-plan.md`: record actual outcome and limitations.
 
 ---
 
@@ -363,6 +363,7 @@ git commit -m "test: checkpoint Sepolia benchmark results"
 
 **Files:**
 - Create: `contracts/scripts/sepolia-benchmark-preflight.ts`
+- Modify: `contracts/scripts/sepolia-benchmark-helpers.ts`
 - Modify: `contracts/package.json`
 - Modify: `tests/sepolia-benchmark-helpers.test.ts`
 
@@ -435,7 +436,7 @@ Expected: all tests pass and TypeScript exits 0.
 - [ ] **Step 6: Commit the read-only preflight**
 
 ```bash
-git add contracts/scripts/sepolia-benchmark-preflight.ts contracts/package.json tests/sepolia-benchmark-helpers.test.ts
+git add contracts/scripts/sepolia-benchmark-preflight.ts contracts/scripts/sepolia-benchmark-helpers.ts contracts/package.json tests/sepolia-benchmark-helpers.test.ts
 git commit -m "feat: preflight Sepolia benchmark budget"
 ```
 
