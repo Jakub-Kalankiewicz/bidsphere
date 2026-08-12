@@ -102,6 +102,17 @@ export interface SepoliaBenchmarkResult {
   runtime: { node: string; hardhat: string };
 }
 
+export interface CreateInitialBenchmarkResultMetadata {
+  seriesId: string;
+  startedAtUtc: string;
+  rpcProviderLabel: string | null;
+  codeVersion: string;
+  deployerAddress: string;
+  approvedMaximumWei: bigint;
+  balanceBeforeWei: bigint;
+  runtime: { node: string; hardhat: string };
+}
+
 export interface BuildConfirmedTransactionRecordInput {
   operation: BenchmarkOperation;
   transactionHash: string;
@@ -408,6 +419,196 @@ export function assertNextTransactionWithinBudget(input: {
 
 export function calculateActualFee(gasUsed: bigint, effectiveGasPriceWei: bigint): bigint {
   return gasUsed * effectiveGasPriceWei;
+}
+
+export function aggregateRound(
+  records: readonly BenchmarkTransactionRecord[]
+): BenchmarkRoundAggregate {
+  const first = records[0];
+  if (!first || first.round === null) {
+    throw new Error("A round aggregate requires at least one round transaction");
+  }
+  if (
+    records.some(
+      (record) =>
+        record.status !== "confirmed" ||
+        record.round !== first.round ||
+        record.strategy !== first.strategy ||
+        record.warmup !== first.warmup ||
+        record.gasUsed === null ||
+        record.actualFeeWei === null ||
+        record.receiptAtUtc === null ||
+        record.endToEndMs === null
+    )
+  ) {
+    throw new Error("A round aggregate requires matching confirmed transactions");
+  }
+  const startedTimes = records.map((record) => Date.parse(record.submittedAtUtc));
+  const receiptTimes = records.map((record) => Date.parse(record.receiptAtUtc!));
+  const roundStartedMs = Math.min(...startedTimes);
+  const roundReceiptMs = Math.max(...receiptTimes);
+  if (
+    startedTimes.some((time) => !Number.isFinite(time)) ||
+    receiptTimes.some((time) => !Number.isFinite(time)) ||
+    roundReceiptMs < roundStartedMs
+  ) {
+    throw new Error("A round aggregate requires valid chronological timestamps");
+  }
+
+  return {
+    strategy: first.strategy,
+    round: first.round,
+    warmup: first.warmup,
+    transactionCount: records.length,
+    totalGasUsed: records
+      .reduce((total, record) => total + BigInt(record.gasUsed!), 0n)
+      .toString(),
+    totalActualFeeWei: records
+      .reduce((total, record) => total + BigInt(record.actualFeeWei!), 0n)
+      .toString(),
+    wallClockMs: roundReceiptMs - roundStartedMs,
+  };
+}
+
+export function calculateReservedPendingWei(
+  records: readonly BenchmarkTransactionRecord[]
+): bigint {
+  return records.reduce(
+    (total, record) =>
+      record.status === "pending" ? total + BigInt(record.worstCaseFeeWei) : total,
+    0n
+  );
+}
+
+function deriveBenchmarkProgress(result: SepoliaBenchmarkResult): Pick<
+  SepoliaBenchmarkResult,
+  "rounds" | "totalGasUsed" | "totalActualFeeWei" | "reservedPendingWei"
+> {
+  const confirmed = result.transactions.filter(
+    (record) => record.status === "confirmed"
+  );
+  const totalGasUsed = confirmed.reduce(
+    (total, record) => total + BigInt(record.gasUsed ?? "0"),
+    0n
+  );
+  const totalActualFeeWei = confirmed.reduce(
+    (total, record) => total + BigInt(record.actualFeeWei ?? "0"),
+    0n
+  );
+  const rounds: BenchmarkRoundAggregate[] = [];
+  const totalRounds =
+    SEPOLIA_BENCHMARK_CONFIG.warmupRounds +
+    SEPOLIA_BENCHMARK_CONFIG.recordedRounds;
+
+  for (const strategy of ["individual", "merkle"] as const) {
+    for (let round = 0; round < totalRounds; round += 1) {
+      const records = confirmed.filter(
+        (record) => record.strategy === strategy && record.round === round
+      );
+      if (records.length > 0) {
+        const aggregate = aggregateRound(records);
+        const existing = result.rounds.find(
+          (candidate) =>
+            candidate.strategy === strategy &&
+            candidate.round === round &&
+            candidate.transactionCount === records.length
+        );
+        rounds.push(
+          existing ? { ...aggregate, wallClockMs: existing.wallClockMs } : aggregate
+        );
+      }
+    }
+  }
+
+  return {
+    rounds,
+    totalGasUsed: totalGasUsed.toString(),
+    totalActualFeeWei: totalActualFeeWei.toString(),
+    reservedPendingWei: calculateReservedPendingWei(result.transactions).toString(),
+  };
+}
+
+export function createInitialBenchmarkResult(
+  metadata: CreateInitialBenchmarkResultMetadata,
+  operations: readonly BenchmarkOperation[]
+): SepoliaBenchmarkResult {
+  if (calculateAggregateGasCeiling([...operations]) !== 16_500_000n) {
+    throw new Error("Benchmark operation plan must use the fixed aggregate gas ceiling");
+  }
+
+  return {
+    schemaVersion: 1,
+    seriesId: metadata.seriesId,
+    startedAtUtc: metadata.startedAtUtc,
+    completedAtUtc: null,
+    status: "running",
+    abortReason: null,
+    network: "sepolia",
+    chainId: 11_155_111,
+    rpcProviderLabel: metadata.rpcProviderLabel,
+    codeVersion: metadata.codeVersion,
+    deployerAddress: metadata.deployerAddress,
+    contractAddresses: { individual: null, merkle: null },
+    configuration: {
+      batchSize: 10,
+      warmupRounds: 1,
+      recordedRounds: 5,
+      receiptConfirmations: 1,
+      receiptTimeoutMs: 600000,
+      aggregateGasCeiling: "16500000",
+      approvedMaximumWei: metadata.approvedMaximumWei.toString(),
+    },
+    plannedOperations: operations.map(({ gasLimit, ...operation }) => ({
+      ...operation,
+      gasLimit: gasLimit.toString(),
+    })),
+    transactions: [],
+    rounds: [],
+    totalGasUsed: "0",
+    totalActualFeeWei: "0",
+    reservedPendingWei: "0",
+    balanceBeforeWei: metadata.balanceBeforeWei.toString(),
+    balanceAfterWei: null,
+    runtime: { ...metadata.runtime },
+  };
+}
+
+export function completeBenchmarkResult(
+  result: SepoliaBenchmarkResult,
+  balanceAfterWei: bigint
+): SepoliaBenchmarkResult {
+  if (
+    result.transactions.length !== 68 ||
+    result.transactions.some(
+      (record) => record.status !== "confirmed" || record.receiptStatus !== 1
+    )
+  ) {
+    throw new Error("Completion requires exactly 68 confirmed status-one records");
+  }
+
+  return {
+    ...result,
+    ...deriveBenchmarkProgress(result),
+    status: "completed",
+    abortReason: null,
+    completedAtUtc: new Date().toISOString(),
+    balanceAfterWei: balanceAfterWei.toString(),
+  };
+}
+
+export function abortBenchmarkResult(
+  result: SepoliaBenchmarkResult,
+  reason: string,
+  balanceAfterWei: bigint | null
+): SepoliaBenchmarkResult {
+  return {
+    ...result,
+    ...deriveBenchmarkProgress(result),
+    status: "aborted",
+    abortReason: reason,
+    completedAtUtc: new Date().toISOString(),
+    balanceAfterWei: balanceAfterWei?.toString() ?? null,
+  };
 }
 
 export function buildConfirmedTransactionRecord(

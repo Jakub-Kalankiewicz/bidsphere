@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  aggregateRound,
+  abortBenchmarkResult,
   assertNextTransactionWithinBudget,
   assertSecretFree,
   buildBenchmarkPreflightReport,
@@ -9,9 +11,13 @@ import {
   buildConfirmedTransactionRecord,
   calculateActualFee,
   calculateAggregateGasCeiling,
+  calculateReservedPendingWei,
+  completeBenchmarkResult,
+  createInitialBenchmarkResult,
   parseApprovedMaximumWei,
   withTimeout,
 } from "../contracts/scripts/sepolia-benchmark-helpers.ts";
+import type { BenchmarkTransactionRecord } from "../contracts/scripts/sepolia-benchmark-helpers.ts";
 
 test("builds exactly 68 operations with one warm-up and five recorded rounds", () => {
   const plan = buildBenchmarkOperationPlan("series-fixed");
@@ -115,6 +121,216 @@ test("builds serializable records with monotonic confirmed durations", () => {
     confirmationMs: 1000,
     endToEndMs: 1025,
   });
+});
+
+test("aggregates ten confirmed individual transactions into one round", () => {
+  const operation = buildBenchmarkOperationPlan("series-fixed")[2];
+  const literalValues = [
+    { gasUsed: "1", actualFeeWei: "10", submittedMs: 100, receiptMs: 200 },
+    { gasUsed: "2", actualFeeWei: "20", submittedMs: 300, receiptMs: 400 },
+    { gasUsed: "3", actualFeeWei: "30", submittedMs: 500, receiptMs: 600 },
+    { gasUsed: "4", actualFeeWei: "40", submittedMs: 700, receiptMs: 800 },
+    { gasUsed: "5", actualFeeWei: "50", submittedMs: 900, receiptMs: 1000 },
+    { gasUsed: "6", actualFeeWei: "60", submittedMs: 1100, receiptMs: 1200 },
+    { gasUsed: "7", actualFeeWei: "70", submittedMs: 1300, receiptMs: 1400 },
+    { gasUsed: "8", actualFeeWei: "80", submittedMs: 1500, receiptMs: 1600 },
+    { gasUsed: "9", actualFeeWei: "90", submittedMs: 1700, receiptMs: 1800 },
+    { gasUsed: "10", actualFeeWei: "100", submittedMs: 1900, receiptMs: 2100 },
+  ] as const;
+  const records: BenchmarkTransactionRecord[] = literalValues.map((value, index) => ({
+    operationId: `individual:0:${index}`,
+    kind: "individual-registration",
+    strategy: "individual",
+    round: 0,
+    warmup: true,
+    sequenceInRound: index,
+    status: "confirmed",
+    transactionHash: `0x${index}`,
+    blockNumber: 100 + index,
+    receiptStatus: 1,
+    confirmationsRequested: 1,
+    gasEstimate: value.gasUsed,
+    gasLimit: operation.gasLimit.toString(),
+    gasUsed: value.gasUsed,
+    maxFeePerGasWei: "15",
+    maxPriorityFeePerGasWei: "1",
+    effectiveGasPriceWei: "10",
+    actualFeeWei: value.actualFeeWei,
+    worstCaseFeeWei: "2250000",
+    submittedAtUtc: new Date(value.submittedMs).toISOString(),
+    receiptAtUtc: new Date(value.receiptMs).toISOString(),
+    submissionMs: 25,
+    confirmationMs: value.receiptMs - value.submittedMs - 25,
+    endToEndMs: value.receiptMs - value.submittedMs,
+  }));
+
+  assert.deepEqual(aggregateRound(records), {
+    strategy: "individual",
+    round: 0,
+    warmup: true,
+    transactionCount: 10,
+    totalGasUsed: "55",
+    totalActualFeeWei: "550",
+    wallClockMs: 2000,
+  });
+});
+
+test("reserves only the worst-case cost of pending transactions", () => {
+  const confirmed = buildConfirmedTransactionRecord({
+    operation: buildBenchmarkOperationPlan("series-fixed")[2],
+    transactionHash: "0xconfirmed",
+    receiptStatus: 1,
+    blockNumber: 123,
+    gasEstimate: 1n,
+    gasUsed: 1n,
+    maxFeePerGasWei: 1n,
+    maxPriorityFeePerGasWei: 0n,
+    effectiveGasPriceWei: 1n,
+    submittedAtUtc: "2026-08-12T10:00:00.000Z",
+    receiptAtUtc: "2026-08-12T10:00:00.001Z",
+    startedMs: 100,
+    broadcastMs: 100,
+    receiptMs: 101,
+  });
+  const pending: BenchmarkTransactionRecord = {
+    ...confirmed,
+    operationId: "individual:0:1",
+    status: "pending",
+    blockNumber: null,
+    receiptStatus: null,
+    gasUsed: null,
+    effectiveGasPriceWei: null,
+    actualFeeWei: null,
+    worstCaseFeeWei: "225",
+    receiptAtUtc: null,
+    confirmationMs: null,
+    endToEndMs: null,
+  };
+
+  assert.equal(calculateReservedPendingWei([confirmed, pending]), 225n);
+  assert.equal(calculateReservedPendingWei([confirmed]), 0n);
+});
+
+function createResultMetadata() {
+  return {
+    seriesId: "series-state",
+    startedAtUtc: "2026-08-12T10:00:00.000Z",
+    rpcProviderLabel: "test provider",
+    codeVersion: "abc123",
+    deployerAddress: "0x1234",
+    approvedMaximumWei: 999n,
+    balanceBeforeWei: 1_000n,
+    runtime: { node: "v24.0.0", hardhat: "2.22.0" },
+  };
+}
+
+function createConfirmedPlanRecords(): BenchmarkTransactionRecord[] {
+  return buildBenchmarkOperationPlan("series-state").map((operation, index) =>
+    buildConfirmedTransactionRecord({
+      operation,
+      transactionHash: `0x${index}`,
+      receiptStatus: 1,
+      blockNumber: 1_000 + index,
+      gasEstimate: 1n,
+      gasUsed: 1n,
+      maxFeePerGasWei: 3n,
+      maxPriorityFeePerGasWei: 1n,
+      effectiveGasPriceWei: 2n,
+      submittedAtUtc: new Date(index).toISOString(),
+      receiptAtUtc: new Date(index + 1).toISOString(),
+      startedMs: index,
+      broadcastMs: index,
+      receiptMs: index + 1,
+    })
+  );
+}
+
+test("creates the serializable running result before any transaction", () => {
+  const operations = buildBenchmarkOperationPlan("series-state");
+  const result = createInitialBenchmarkResult(createResultMetadata(), operations);
+
+  assert.equal(result.status, "running");
+  assert.equal(result.transactions.length, 0);
+  assert.equal(result.plannedOperations.length, 68);
+  assert.equal(result.plannedOperations[0].gasLimit, "1500000");
+  assert.equal(result.configuration.approvedMaximumWei, "999");
+  assert.equal(result.balanceBeforeWei, "1000");
+  assert.equal(result.totalGasUsed, "0");
+  assert.equal(result.totalActualFeeWei, "0");
+  assert.equal(result.reservedPendingWei, "0");
+});
+
+test("completes only 68 successful receipts and derives totals and round aggregates", () => {
+  const initial = createInitialBenchmarkResult(
+    createResultMetadata(),
+    buildBenchmarkOperationPlan("series-state")
+  );
+  const result = completeBenchmarkResult(
+    { ...initial, transactions: createConfirmedPlanRecords() },
+    864n
+  );
+
+  assert.equal(result.status, "completed");
+  assert.match(result.completedAtUtc ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(result.totalGasUsed, "68");
+  assert.equal(result.totalActualFeeWei, "136");
+  assert.equal(result.reservedPendingWei, "0");
+  assert.equal(result.balanceAfterWei, "864");
+  assert.equal(result.rounds.length, 12);
+  assert.deepEqual(result.rounds[0], {
+    strategy: "individual",
+    round: 0,
+    warmup: true,
+    transactionCount: 10,
+    totalGasUsed: "10",
+    totalActualFeeWei: "20",
+    wallClockMs: 10,
+  });
+
+  assert.throws(
+    () => completeBenchmarkResult({ ...initial, transactions: [] }, 1_000n),
+    /68 confirmed status-one/
+  );
+  const failedRecords = createConfirmedPlanRecords();
+  failedRecords[67] = { ...failedRecords[67], receiptStatus: 0 };
+  assert.throws(
+    () => completeBenchmarkResult({ ...initial, transactions: failedRecords }, 1_000n),
+    /68 confirmed status-one/
+  );
+});
+
+test("aborts while preserving confirmed totals and pending reservation", () => {
+  const initial = createInitialBenchmarkResult(
+    createResultMetadata(),
+    buildBenchmarkOperationPlan("series-state")
+  );
+  const [confirmed, pendingSource] = createConfirmedPlanRecords();
+  const pending: BenchmarkTransactionRecord = {
+    ...pendingSource,
+    status: "pending",
+    blockNumber: null,
+    receiptStatus: null,
+    gasUsed: null,
+    effectiveGasPriceWei: null,
+    actualFeeWei: null,
+    worstCaseFeeWei: "225",
+    receiptAtUtc: null,
+    confirmationMs: null,
+    endToEndMs: null,
+  };
+  const result = abortBenchmarkResult(
+    { ...initial, transactions: [confirmed, pending] },
+    "receipt timeout",
+    998n
+  );
+
+  assert.equal(result.status, "aborted");
+  assert.equal(result.abortReason, "receipt timeout");
+  assert.equal(result.totalGasUsed, "1");
+  assert.equal(result.totalActualFeeWei, "2");
+  assert.equal(result.reservedPendingWei, "225");
+  assert.equal(result.balanceAfterWei, "998");
+  assert.deepEqual(result.transactions, [confirmed, pending]);
 });
 
 test("rejects a receipt wait that exceeds its timeout", async () => {
