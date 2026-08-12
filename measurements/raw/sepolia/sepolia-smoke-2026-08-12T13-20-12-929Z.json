@@ -1,0 +1,74 @@
+{
+  "series_id": "sepolia-smoke-2026-08-12T13-20-12-929Z",
+  "timestamp_utc": "2026-08-12T13:20:12.929Z",
+  "network": "sepolia",
+  "chainId": 11155111,
+  "deployerAddress": "0x1D0a483dE7D587401b72E1B7658198eC840cCf2c",
+  "contractAddress": "0x1F14E890e7428322F25Fa6aCfD0A89C045311102",
+  "reusedDeployment": false,
+  "receipts": {
+    "deployment": {
+      "transactionHash": "0xf9a9e3624c7856310b274f016d363f9fc00bbacbdd71c0a8e41bc4ee8fe2c7ec",
+      "blockNumber": 11473435,
+      "status": 1,
+      "gasUsed": "1241515",
+      "effectiveGasPriceWei": "1071194482"
+    },
+    "modelRegistration": {
+      "transactionHash": "0xa92232b5e4b47fc1fa982c5c7e15ecc9488e9ebd54df4fbb6c6c40e0c66cefb7",
+      "blockNumber": 11473436,
+      "status": 1,
+      "gasUsed": "94309",
+      "effectiveGasPriceWei": "1108566493"
+    },
+    "merkleRegistration": {
+      "transactionHash": "0xd228648b09b2c18338e46c438cd203414d6ca0c494242c6241d5e39d31a8bcaf",
+      "blockNumber": 11473437,
+      "status": 1,
+      "gasUsed": "255008",
+      "effectiveGasPriceWei": "1018808617"
+    }
+  },
+  "feeEstimate": {
+    "maxFeePerGasWei": "2236690652",
+    "maxPriorityFeePerGasWei": "1000000",
+    "balanceBeforeWei": "50000000000000000",
+    "boundedMinimumBalanceWei": "5032553967000000",
+    "gasLimits": {
+      "deployment": "1500000",
+      "modelRegistration": "250000",
+      "merkleRegistration": "500000"
+    }
+  },
+  "modelHash": "0x949319cc602fa11db2c8d1185e10457bb9c53e622cc9c9437b434f21cee9d7ca",
+  "merkleRoot": "0xd0c772c6e4cd2a93932d942e10a8536566ea9525aaca910407c8f36d263bde81",
+  "batchId": 1,
+  "storedModelIds": [
+    "bidsphere-sepolia-smoke-model-v1",
+    "bidsphere-sepolia-smoke-decoy-v1"
+  ],
+  "proofSizeBytes": 488,
+  "proofBundle": {
+    "modelId": "bidsphere-sepolia-smoke-model-v1",
+    "modelName": "BidSphere Sepolia smoke GLB v1",
+    "fileHash": "0x949319cc602fa11db2c8d1185e10457bb9c53e622cc9c9437b434f21cee9d7ca",
+    "batchId": 1,
+    "merkleRoot": "0xd0c772c6e4cd2a93932d942e10a8536566ea9525aaca910407c8f36d263bde81",
+    "merkleProof": [
+      "0xbda64a59c9b43422e9fe2a106f0866a7abee1b7347e63ddfd4067b7416e20230"
+    ],
+    "leafIndex": 0,
+    "totalLeaves": 2,
+    "registeredAt": 1786540812,
+    "chainId": 11155111,
+    "contractAddress": "0x1f14e890e7428322f25fa6acfd0a89c045311102"
+  },
+  "verification": {
+    "originalAccepted": true,
+    "oneByteModificationRejected": true
+  },
+  "runtime": {
+    "node": "v24.19.0",
+    "hardhat": "2.28.6"
+  }
+}

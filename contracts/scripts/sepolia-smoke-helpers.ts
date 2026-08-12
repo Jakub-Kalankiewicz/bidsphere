@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 
 export const SEPOLIA_CHAIN_ID = 11_155_111n;
 export const SEPOLIA_SMOKE_GAS_LIMITS = Object.freeze({
-  deployment: 1_000_000n,
+  deployment: 1_500_000n,
   modelRegistration: 250_000n,
   merkleRegistration: 500_000n,
 });

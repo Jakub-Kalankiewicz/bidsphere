@@ -51,6 +51,18 @@ test("derives a bounded balance requirement from the current fee", () => {
   );
 });
 
+test("allows the observed Sepolia deployment estimate within the safety ceiling", () => {
+  const observedDeploymentEstimate = 1_252_536n;
+
+  assert.doesNotThrow(() =>
+    assertGasEstimateWithinLimit(
+      observedDeploymentEstimate,
+      SEPOLIA_SMOKE_GAS_LIMITS.deployment,
+      "contract deployment"
+    )
+  );
+});
+
 test("uses the production verifier for the full Sepolia trust context", async () => {
   const fixture = buildSepoliaFixture();
   assert.equal(fixture.bytes.subarray(0, 4).toString("utf8"), "glTF");
