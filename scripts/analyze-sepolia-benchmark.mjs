@@ -25,7 +25,7 @@ function requireObject(value, label) {
 }
 
 function requireDecimal(value, label, { allowZero = false } = {}) {
-  if (typeof value !== "string" || !/^\d+$/.test(value)) {
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d*)$/.test(value)) {
     fail(`${label} must be a decimal string`);
   }
   const parsed = BigInt(value);
@@ -35,9 +35,15 @@ function requireDecimal(value, label, { allowZero = false } = {}) {
   return parsed;
 }
 
-function requireFiniteNonNegative(value, label) {
+function requireTimestamp(value, label, invalid = fail) {
+  if (typeof value !== "string" || Number.isNaN(Date.parse(value))) {
+    invalid(`${label} must be a valid UTC timestamp`);
+  }
+}
+
+function requireFiniteNonNegative(value, label, invalid = fail) {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    fail(`${label} must be a finite non-negative number`);
+    invalid(`${label} must be a finite non-negative number`);
   }
   return value;
 }
@@ -50,7 +56,7 @@ function requireSafeNumber(value, label) {
   return number;
 }
 
-function expectedTransactionKey(record) {
+function expectedTransactionKey(record, invalid = fail) {
   if (record.kind === "deployment") {
     if (
       (record.strategy !== "individual" && record.strategy !== "merkle") ||
@@ -59,16 +65,16 @@ function expectedTransactionKey(record) {
       record.sequenceInRound !== null ||
       record.operationId !== `deployment:${record.strategy}`
     ) {
-      fail("transaction topology does not match the two deployments");
+      invalid("transaction topology does not match the two deployments");
     }
     return record.operationId;
   }
 
   if (!Number.isInteger(record.round) || record.round < 0 || record.round >= 6) {
-    fail("transaction topology has an invalid round");
+    invalid("transaction topology has an invalid round");
   }
   if (record.warmup !== (record.round === 0)) {
-    fail("transaction topology has an invalid warm-up marker");
+    invalid("transaction topology has an invalid warm-up marker");
   }
 
   if (record.kind === "individual-registration") {
@@ -79,7 +85,7 @@ function expectedTransactionKey(record) {
       record.sequenceInRound >= 10 ||
       record.operationId !== `individual:${record.round}:${record.sequenceInRound}`
     ) {
-      fail("individual transaction topology is invalid");
+      invalid("individual transaction topology is invalid");
     }
     return record.operationId;
   }
@@ -90,12 +96,12 @@ function expectedTransactionKey(record) {
       record.sequenceInRound !== 10 ||
       record.operationId !== `merkle:${record.round}`
     ) {
-      fail("Merkle transaction topology is invalid");
+      invalid("Merkle transaction topology is invalid");
     }
     return record.operationId;
   }
 
-  fail("transaction topology contains an unknown operation kind");
+  invalid("transaction topology contains an unknown operation kind");
 }
 
 function sha256(value) {
@@ -144,9 +150,9 @@ function sameStrings(left, right) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function validatePlannedOperations(raw) {
+function validatePlannedOperations(raw, invalid = fail) {
   if (!Array.isArray(raw.plannedOperations) || raw.plannedOperations.length !== 68) {
-    fail("planned-operation topology must contain exactly 68 operations");
+    invalid("planned-operation topology must contain exactly 68 operations");
   }
   const canonicalOperations = buildCanonicalOperations(raw.seriesId);
   for (const [index, operationValue] of raw.plannedOperations.entries()) {
@@ -172,7 +178,7 @@ function validatePlannedOperations(raw) {
       record.sequenceInRound !== canonical.sequenceInRound ||
       record.gasLimit !== canonical.gasLimit
     ) {
-      fail("planned-operation topology does not match the canonical benchmark plan");
+      invalid("planned-operation topology does not match the canonical benchmark plan");
     }
   }
 }
@@ -190,7 +196,10 @@ export function summarizeFive(values) {
 
 export function validateCompletedSepoliaResult(rawValue) {
   const raw = requireObject(rawValue, "raw result");
-  if (raw.schemaVersion !== 1) fail("schema version must be 1");
+  if (raw.schemaVersion === 1) {
+    fail("schema 1 is legacy diagnostic evidence and cannot be analyzed as a completed benchmark");
+  }
+  if (raw.schemaVersion !== 2) fail("schema version must be 2");
   if (raw.network !== "sepolia") fail('network must be "sepolia"');
   if (raw.chainId !== 11155111) fail("chain ID must be 11155111");
   if (raw.status !== "completed" || raw.abortReason !== null) {
@@ -198,9 +207,8 @@ export function validateCompletedSepoliaResult(rawValue) {
   }
   if (typeof raw.seriesId !== "string" || raw.seriesId.length === 0) fail("series ID is required");
   if (typeof raw.codeVersion !== "string" || raw.codeVersion.length === 0) fail("code version is required");
-  if (typeof raw.completedAtUtc !== "string" || Number.isNaN(Date.parse(raw.completedAtUtc))) {
-    fail("completion timestamp is required");
-  }
+  requireTimestamp(raw.startedAtUtc, "start timestamp");
+  requireTimestamp(raw.completedAtUtc, "completion timestamp");
 
   const configuration = requireObject(raw.configuration, "configuration");
   if (
@@ -236,8 +244,9 @@ export function validateCompletedSepoliaResult(rawValue) {
   let experimentFee = 0n;
   const operationIds = new Set();
   const transactionHashes = new Set();
+  let firstNonce = null;
 
-  for (const transactionValue of raw.transactions) {
+  for (const [index, transactionValue] of raw.transactions.entries()) {
     const record = requireObject(transactionValue, "transaction record");
     if (record.status !== "confirmed" || record.receiptStatus !== 1) {
       fail("exactly 68 confirmed status-one transactions are required");
@@ -251,13 +260,52 @@ export function validateCompletedSepoliaResult(rawValue) {
     operationIds.add(operationId);
     transactionHashes.add(record.transactionHash.toLowerCase());
 
+    if (!Number.isSafeInteger(record.nonce) || record.nonce < 0) {
+      fail(`${operationId} nonce must be a safe non-negative integer`);
+    }
+    if (firstNonce === null) firstNonce = record.nonce;
+    if (record.nonce !== firstNonce + index) {
+      fail("transaction nonces must be contiguous in canonical operation order");
+    }
+    if (record.broadcastAcknowledged !== true) {
+      fail(`${operationId} broadcast acknowledgement must be true`);
+    }
+    if (!Number.isSafeInteger(record.blockNumber) || record.blockNumber <= 0) {
+      fail(`${operationId} block number must be a positive safe integer`);
+    }
+    requireTimestamp(record.submittedAtUtc, `${operationId} submission timestamp`);
+    requireTimestamp(record.broadcastAtUtc, `${operationId} broadcast timestamp`);
+    requireTimestamp(record.receiptAtUtc, `${operationId} receipt timestamp`);
+
+    const gasEstimate = requireDecimal(record.gasEstimate, `${operationId} gas estimate`);
+    const gasLimit = requireDecimal(record.gasLimit, `${operationId} gas limit`);
     const gasUsed = requireDecimal(record.gasUsed, `${operationId} gas used`);
+    const maxFee = requireDecimal(record.maxFeePerGasWei, `${operationId} maximum fee per gas`);
+    const priorityFee = requireDecimal(record.maxPriorityFeePerGasWei, `${operationId} priority fee`, { allowZero: true });
     const effectiveGasPrice = requireDecimal(record.effectiveGasPriceWei, `${operationId} effective gas price`);
     const actualFee = requireDecimal(record.actualFeeWei, `${operationId} actual fee`);
+    const worstCaseFee = requireDecimal(record.worstCaseFeeWei, `${operationId} worst-case fee`);
+    if (gasEstimate > gasLimit) fail(`${operationId} gas estimate exceeds gas limit`);
+    if (gasUsed > gasLimit) fail(`${operationId} gas used exceeds gas limit`);
+    if (priorityFee > maxFee) fail(`${operationId} priority fee exceeds maximum fee`);
+    if (effectiveGasPrice > maxFee) fail(`${operationId} effective gas price exceeds maximum fee`);
     if (gasUsed * effectiveGasPrice !== actualFee) {
       fail(`${operationId} receipt fee does not equal gas used times effective gas price`);
     }
-    requireFiniteNonNegative(record.endToEndMs, `${operationId} end-to-end duration`);
+    if (gasLimit * maxFee !== worstCaseFee) {
+      fail(`${operationId} worst-case fee does not equal gas limit times maximum fee`);
+    }
+    const startedOffset = requireFiniteNonNegative(record.startedOffsetMs, `${operationId} started offset`);
+    const broadcastOffset = requireFiniteNonNegative(record.broadcastOffsetMs, `${operationId} broadcast offset`);
+    const receiptOffset = requireFiniteNonNegative(record.receiptOffsetMs, `${operationId} receipt offset`);
+    if (broadcastOffset < startedOffset) fail(`${operationId} broadcast offset precedes started offset`);
+    if (receiptOffset < broadcastOffset) fail(`${operationId} receipt offset precedes broadcast offset`);
+    const submission = requireFiniteNonNegative(record.submissionMs, `${operationId} submission duration`);
+    const confirmation = requireFiniteNonNegative(record.confirmationMs, `${operationId} confirmation duration`);
+    const endToEnd = requireFiniteNonNegative(record.endToEndMs, `${operationId} end-to-end duration`);
+    if (submission !== broadcastOffset - startedOffset) fail(`${operationId} submission duration does not match offsets`);
+    if (confirmation !== receiptOffset - broadcastOffset) fail(`${operationId} confirmation duration does not match offsets`);
+    if (endToEnd !== receiptOffset - startedOffset) fail(`${operationId} end-to-end duration does not match offsets`);
     experimentGas += gasUsed;
     experimentFee += actualFee;
   }
@@ -297,7 +345,13 @@ export function validateCompletedSepoliaResult(rawValue) {
     if (requireDecimal(aggregate.totalActualFeeWei, `${key} round fee`) !== derivedFee) {
       fail(`${key} round fee does not agree with receipts`);
     }
-    requireFiniteNonNegative(aggregate.wallClockMs, `${key} round wall-clock duration`);
+    const wallClock = requireFiniteNonNegative(aggregate.wallClockMs, `${key} round wall-clock duration`);
+    const derivedWallClock =
+      Math.max(...records.map((record) => record.receiptOffsetMs)) -
+      Math.min(...records.map((record) => record.startedOffsetMs));
+    if (wallClock !== derivedWallClock) {
+      fail(`${key} round wall-clock duration does not match monotonic offsets`);
+    }
   }
   for (const strategy of ["individual", "merkle"]) {
     for (let round = 0; round < EXPECTED_TOTAL_ROUNDS; round += 1) {
@@ -341,7 +395,7 @@ export function validateCompletedMatchedHardhatResult(rawValue) {
     throw new Error(`Invalid matched Hardhat benchmark: ${message}`);
   };
   if (
-    raw.schemaVersion !== 1 ||
+    raw.schemaVersion !== 2 ||
     raw.kind !== "hardhat-sepolia-matched" ||
     raw.status !== "completed"
   ) {
@@ -381,24 +435,54 @@ export function validateCompletedMatchedHardhatResult(rawValue) {
   ) {
     matchedFail("configuration must describe batch 10, one warm-up, five recorded rounds, and 68 operations");
   }
+  const addresses = requireObject(raw.contractAddresses, "matched contract addresses");
+  if (
+    typeof addresses.individual !== "string" || typeof addresses.merkle !== "string" ||
+    !ADDRESS_PATTERN.test(addresses.individual) || !ADDRESS_PATTERN.test(addresses.merkle) ||
+    addresses.individual.toLowerCase() === ZERO_ADDRESS ||
+    addresses.merkle.toLowerCase() === ZERO_ADDRESS ||
+    addresses.individual.toLowerCase() === addresses.merkle.toLowerCase()
+  ) matchedFail("two valid, nonzero, distinct contract addresses are required");
 
-  validateCompletedSepoliaResult({
-    ...raw,
-    network: "sepolia",
-    chainId: 11155111,
-    status: "completed",
-    abortReason: null,
-    configuration: {
-      ...configuration,
-      receiptConfirmations: 1,
-      receiptTimeoutMs: 600000,
-      aggregateGasCeiling: "16500000",
-      approvedMaximumWei: "1",
-    },
-    reservedPendingWei: "0",
-  });
-
-  for (const record of raw.transactions) {
+  if (!Array.isArray(raw.transactions) || raw.transactions.length !== EXPECTED_TRANSACTION_COUNT) {
+    matchedFail("exactly 68 confirmed status-one transactions are required");
+  }
+  const operationIds = new Set();
+  const transactionHashes = new Set();
+  let experimentGas = 0n;
+  let experimentFee = 0n;
+  for (const recordValue of raw.transactions) {
+    const record = requireObject(recordValue, "matched transaction record");
+    if (record.status !== "confirmed" || record.receiptStatus !== 1 || record.confirmationsRequested !== 1) {
+      matchedFail("exactly 68 confirmed status-one transactions are required");
+    }
+    const operationId = expectedTransactionKey(record, matchedFail);
+    if (operationIds.has(operationId)) matchedFail("transaction topology contains a duplicate operation");
+    if (!/^0x[0-9a-fA-F]{64}$/.test(record.transactionHash) || transactionHashes.has(record.transactionHash.toLowerCase())) {
+      matchedFail("transaction topology contains a duplicate or missing hash");
+    }
+    operationIds.add(operationId);
+    transactionHashes.add(record.transactionHash.toLowerCase());
+    if (!Number.isSafeInteger(record.blockNumber) || record.blockNumber <= 0) {
+      matchedFail(`${operationId} block number must be a positive safe integer`);
+    }
+    requireTimestamp(record.submittedAtUtc, `${operationId} submission timestamp`, matchedFail);
+    requireTimestamp(record.receiptAtUtc, `${operationId} receipt timestamp`, matchedFail);
+    const gasLimit = requireDecimal(record.gasLimit, `${operationId} gas limit`);
+    const gasUsed = requireDecimal(record.gasUsed, `${operationId} gas used`);
+    const effectiveGasPrice = requireDecimal(record.effectiveGasPriceWei, `${operationId} effective gas price`);
+    const actualFee = requireDecimal(record.actualFeeWei, `${operationId} actual fee`);
+    if (gasUsed > gasLimit) matchedFail(`${operationId} gas used exceeds gas limit`);
+    if (gasUsed * effectiveGasPrice !== actualFee) {
+      matchedFail(`${operationId} receipt fee does not equal gas used times effective gas price`);
+    }
+    const startedOffset = requireFiniteNonNegative(record.startedOffsetMs, `${operationId} started offset`, matchedFail);
+    const receiptOffset = requireFiniteNonNegative(record.receiptOffsetMs, `${operationId} receipt offset`, matchedFail);
+    const endToEnd = requireFiniteNonNegative(record.endToEndMs, `${operationId} end-to-end duration`, matchedFail);
+    if (receiptOffset < startedOffset) matchedFail(`${operationId} receipt offset precedes started offset`);
+    if (endToEnd !== receiptOffset - startedOffset) {
+      matchedFail(`${operationId} end-to-end duration does not match offsets`);
+    }
     const expectedAddress = raw.contractAddresses[record.strategy];
     if (
       typeof record.contractAddress !== "string" ||
@@ -407,7 +491,43 @@ export function validateCompletedMatchedHardhatResult(rawValue) {
     ) {
       matchedFail("every transaction must identify its strategy contract address");
     }
+    experimentGas += gasUsed;
+    experimentFee += actualFee;
   }
+  validatePlannedOperations(raw, matchedFail);
+
+  if (!Array.isArray(raw.rounds) || raw.rounds.length !== 12) {
+    matchedFail("round topology must contain exactly twelve aggregates");
+  }
+  const roundKeys = new Set();
+  for (const aggregate of raw.rounds) {
+    if (
+      (aggregate.strategy !== "individual" && aggregate.strategy !== "merkle") ||
+      !Number.isInteger(aggregate.round) || aggregate.round < 0 || aggregate.round >= 6 ||
+      aggregate.warmup !== (aggregate.round === 0)
+    ) matchedFail("round topology is invalid");
+    const key = `${aggregate.strategy}:${aggregate.round}`;
+    if (roundKeys.has(key)) matchedFail("round topology contains a duplicate aggregate");
+    roundKeys.add(key);
+    const records = raw.transactions.filter(
+      (record) => record.strategy === aggregate.strategy && record.round === aggregate.round
+    );
+    const expectedCount = aggregate.strategy === "individual" ? 10 : 1;
+    if (records.length !== expectedCount || aggregate.transactionCount !== expectedCount) {
+      matchedFail("round topology contains the wrong transaction count");
+    }
+    const derivedGas = records.reduce((sum, record) => sum + BigInt(record.gasUsed), 0n);
+    const derivedFee = records.reduce((sum, record) => sum + BigInt(record.actualFeeWei), 0n);
+    if (requireDecimal(aggregate.totalGasUsed, `${key} round gas`) !== derivedGas) matchedFail(`${key} round gas does not agree with receipts`);
+    if (requireDecimal(aggregate.totalActualFeeWei, `${key} round fee`) !== derivedFee) matchedFail(`${key} round fee does not agree with receipts`);
+    const wallClock = requireFiniteNonNegative(aggregate.wallClockMs, `${key} round wall-clock duration`, matchedFail);
+    const derivedWallClock =
+      Math.max(...records.map((record) => record.receiptOffsetMs)) -
+      Math.min(...records.map((record) => record.startedOffsetMs));
+    if (wallClock !== derivedWallClock) matchedFail(`${key} round wall-clock duration does not match monotonic offsets`);
+  }
+  if (requireDecimal(raw.totalGasUsed, "matched experiment gas") !== experimentGas) matchedFail("experiment gas does not agree with receipts");
+  if (requireDecimal(raw.totalActualFeeWei, "matched experiment fee") !== experimentFee) matchedFail("experiment fee does not agree with receipts");
 
   const merkle = raw.transactions.filter((record) => record.kind === "merkle-registration");
   if (

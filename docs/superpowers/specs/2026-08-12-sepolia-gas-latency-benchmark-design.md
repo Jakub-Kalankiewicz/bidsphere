@@ -93,8 +93,11 @@ to match the identifiers used in the local benchmark and to avoid overwriting
 existing storage slots. Merkle roots are deterministic for the series and
 round, but are unique between rounds.
 
-For every transaction, the runner records monotonic durations around these
-boundaries:
+Schema-version-2 artifacts record each timing boundary as a non-negative,
+series-relative offset from one `performance.now()` origin. The paid runner
+stores `startedOffsetMs`, `broadcastOffsetMs`, and `receiptOffsetMs`; the
+matched Hardhat runner stores `startedOffsetMs` and `receiptOffsetMs`.
+Durations are exact differences between those stored offsets:
 
 - submission duration: immediately before the contract call until a
   transaction response with a hash is returned;
@@ -103,11 +106,11 @@ boundaries:
 - end-to-end duration: immediately before the contract call until the receipt
   is available.
 
-For an individual round, the runner also records wall-clock duration from the
-start of the first registration until receipt of the tenth registration. The
-Merkle round duration is the end-to-end duration of its single transaction.
-Durations use a monotonic clock; corresponding UTC timestamps provide audit
-context.
+For an individual round, `wallClockMs` is reconstructed as the largest receipt
+offset minus the smallest start offset among its ten registrations. The same
+formula makes a one-transaction Merkle round equal its transaction end-to-end
+duration. UTC timestamps provide audit context only and are never used for
+duration or round-latency arithmetic.
 
 ## Recorded Data
 
@@ -125,6 +128,7 @@ The raw artifact contains:
 - gas estimate, configured gas limit, `gasUsed`, effective gas price and
   actual fee in wei;
 - submission, confirmation and end-to-end durations;
+- series-relative monotonic offsets for every recorded timing boundary;
 - per-round aggregate gas, fee and wall-clock duration;
 - total experiment gas and fee;
 - the user-approved maximum cost and remaining wallet balance checks.
@@ -157,6 +161,13 @@ Its three explicit CLI arguments are the Sepolia JSON, matched Hardhat JSON,
 and output summary. The sibling checksum is discovered as
 `<matched-hardhat.json>.sha256`; all four filesystem endpoints must be distinct
 after resolved-path, symbolic-link, and hard-link checks.
+
+The analyzer accepts only completed schema-version-2 evidence. The historical
+aborted schema-version-1 Sepolia artifact remains byte-for-byte unchanged and
+is diagnostic evidence only; it is neither migrated nor admitted to processed
+results. Validation reconstructs every duration and round latency from the
+monotonic offsets and rejects inconsistent transaction gas, fee, nonce,
+broadcast, receipt, or aggregate fields.
 
 ## Descriptive Analysis
 

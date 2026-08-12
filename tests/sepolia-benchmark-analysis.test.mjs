@@ -111,7 +111,11 @@ function transaction({
   sequenceInRound,
   gasUsed,
   index,
+  startedOffsetMs = index * 100,
+  endToEndMs = 100,
 }) {
+  const broadcastOffsetMs = startedOffsetMs + 10;
+  const receiptOffsetMs = startedOffsetMs + endToEndMs;
   return {
     operationId,
     kind,
@@ -121,6 +125,8 @@ function transaction({
     sequenceInRound,
     status: "confirmed",
     transactionHash: `0x${index.toString(16).padStart(64, "0")}`,
+    nonce: 40 + index,
+    broadcastAcknowledged: true,
     blockNumber: 1000 + index,
     receiptStatus: 1,
     confirmationsRequested: 1,
@@ -133,10 +139,14 @@ function transaction({
     actualFeeWei: String(gasUsed * 2),
     worstCaseFeeWei: String((kind === "deployment" ? 1500000 : kind === "individual-registration" ? 150000 : 750000) * 3),
     submittedAtUtc: new Date(index * 1000).toISOString(),
+    broadcastAtUtc: new Date(index * 1000 + 10).toISOString(),
     receiptAtUtc: new Date(index * 1000 + 100).toISOString(),
+    startedOffsetMs,
+    broadcastOffsetMs,
+    receiptOffsetMs,
     submissionMs: 10,
-    confirmationMs: 90,
-    endToEndMs: 100,
+    confirmationMs: endToEndMs - 10,
+    endToEndMs,
   };
 }
 
@@ -149,10 +159,13 @@ function createCompletedRaw() {
   const individualRounds = [];
   const merkleRounds = [];
   let index = 3;
+  let timingCursor = 300;
 
   for (let round = 0; round < 6; round += 1) {
     const gasUsed = INDIVIDUAL_ROUND_GAS[round] / 10;
     for (let sequenceInRound = 0; sequenceInRound < 10; sequenceInRound += 1) {
+      const individualDuration =
+        sequenceInRound === 9 ? INDIVIDUAL_ROUND_MS[round] - 900 : 100;
       transactions.push(transaction({
         operationId: `individual:${round}:${sequenceInRound}`,
         kind: "individual-registration",
@@ -162,6 +175,8 @@ function createCompletedRaw() {
         sequenceInRound,
         gasUsed,
         index,
+        startedOffsetMs: timingCursor + sequenceInRound * 100,
+        endToEndMs: individualDuration,
       }));
       index += 1;
     }
@@ -174,6 +189,7 @@ function createCompletedRaw() {
       totalActualFeeWei: String(INDIVIDUAL_ROUND_GAS[round] * 2),
       wallClockMs: INDIVIDUAL_ROUND_MS[round],
     });
+    timingCursor += INDIVIDUAL_ROUND_MS[round] + 100;
     transactions.push(transaction({
       operationId: `merkle:${round}`,
       kind: "merkle-registration",
@@ -183,6 +199,8 @@ function createCompletedRaw() {
       sequenceInRound: 10,
       gasUsed: MERKLE_ROUND_GAS[round],
       index,
+      startedOffsetMs: timingCursor,
+      endToEndMs: MERKLE_ROUND_MS[round],
     }));
     index += 1;
     merkleRounds.push({
@@ -194,10 +212,11 @@ function createCompletedRaw() {
       totalActualFeeWei: String(MERKLE_ROUND_GAS[round] * 2),
       wallClockMs: MERKLE_ROUND_MS[round],
     });
+    timingCursor += MERKLE_ROUND_MS[round] + 100;
   }
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     seriesId,
     startedAtUtc: "2026-08-12T10:00:00.000Z",
     completedAtUtc: "2026-08-12T10:10:00.000Z",
@@ -247,15 +266,22 @@ function createMatchedRaw(codeVersion = "0123456789abcdef0123456789abcdef0123456
   const original = createCompletedRaw();
   const transactions = original.transactions.map((record) => {
     const merkle = record.kind === "merkle-registration";
-    return {
+    const matched = {
       ...record,
       contractAddress: original.contractAddresses[record.strategy],
       batchCountBefore: merkle ? record.round : null,
       batchCountAfter: merkle ? record.round + 1 : null,
     };
+    delete matched.nonce;
+    delete matched.broadcastAcknowledged;
+    delete matched.broadcastAtUtc;
+    delete matched.broadcastOffsetMs;
+    delete matched.submissionMs;
+    delete matched.confirmationMs;
+    return matched;
   });
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     kind: "hardhat-sepolia-matched",
     status: "completed",
     seriesId: original.seriesId,
@@ -461,7 +487,7 @@ test("rejects receipt, topology, round, and experiment arithmetic corruption", (
   const forgedGasLimit = createCompletedRaw();
   forgedGasLimit.plannedOperations[0].gasLimit = "1";
   forgedGasLimit.transactions[0].gasLimit = "1";
-  assert.throws(() => validateCompletedSepoliaResult(forgedGasLimit), /topology/);
+  assert.throws(() => validateCompletedSepoliaResult(forgedGasLimit), /gas estimate|topology/);
 
   const wrongFixedConfiguration = createCompletedRaw();
   wrongFixedConfiguration.configuration.aggregateGasCeiling = "1";
@@ -478,6 +504,64 @@ test("rejects receipt, topology, round, and experiment arithmetic corruption", (
   const wrongExperimentTotal = createCompletedRaw();
   wrongExperimentTotal.totalActualFeeWei = "1";
   assert.throws(() => validateCompletedSepoliaResult(wrongExperimentTotal), /experiment fee/);
+});
+
+test("rejects legacy completed schema-one evidence with a diagnostic-only message", () => {
+  const legacy = createCompletedRaw();
+  legacy.schemaVersion = 1;
+  assert.throws(
+    () => validateCompletedSepoliaResult(legacy),
+    /schema 1.*legacy.*diagnostic|legacy.*diagnostic.*schema 1/i
+  );
+});
+
+test("rejects incomplete or inconsistent paid transaction evidence", () => {
+  const mutations = [
+    ["nonce", (record) => { record.nonce = 1.5; }],
+    ["broadcast acknowledgement", (record) => { record.broadcastAcknowledged = false; }],
+    ["broadcast timestamp", (record) => { record.broadcastAtUtc = null; }],
+    ["block number", (record) => { record.blockNumber = 0; }],
+    ["gas estimate", (record) => { record.gasEstimate = "150001"; }],
+    ["priority fee", (record) => { record.maxPriorityFeePerGasWei = "4"; }],
+    ["effective gas price", (record) => { record.effectiveGasPriceWei = "4"; }],
+    ["worst-case fee", (record) => { record.worstCaseFeeWei = "1"; }],
+    ["started offset", (record) => { record.startedOffsetMs = -1; }],
+    ["broadcast offset", (record) => { record.broadcastOffsetMs = record.startedOffsetMs - 1; }],
+    ["receipt offset", (record) => { record.receiptOffsetMs = record.broadcastOffsetMs - 1; }],
+    ["submission duration", (record) => { record.submissionMs += 1; }],
+    ["confirmation duration", (record) => { record.confirmationMs += 1; }],
+    ["end-to-end duration", (record) => { record.endToEndMs += 1; }],
+  ];
+
+  for (const [label, mutate] of mutations) {
+    const raw = createCompletedRaw();
+    mutate(raw.transactions[2]);
+    assert.throws(
+      () => validateCompletedSepoliaResult(raw),
+      new RegExp(String(label).replace("-", "[- ]"), "i"),
+      label
+    );
+  }
+
+  const noncontiguousNonce = createCompletedRaw();
+  noncontiguousNonce.transactions[10].nonce += 5;
+  assert.throws(() => validateCompletedSepoliaResult(noncontiguousNonce), /nonce.*contiguous/i);
+});
+
+test("rejects forged paid and matched round latency independently of UTC timestamps", () => {
+  const paid = createCompletedRaw();
+  paid.rounds[0].wallClockMs += 1;
+  assert.throws(() => validateCompletedSepoliaResult(paid), /wall-clock.*offset/i);
+
+  const matched = createMatchedRaw();
+  matched.rounds[0].wallClockMs += 1;
+  assert.throws(() => validateCompletedMatchedHardhatResult(matched), /wall-clock.*offset/i);
+
+  const reversedUtc = createCompletedRaw();
+  reversedUtc.transactions[2].submittedAtUtc = "2026-08-12T10:00:01.000Z";
+  reversedUtc.transactions[2].broadcastAtUtc = "2026-08-12T09:59:59.000Z";
+  reversedUtc.transactions[2].receiptAtUtc = "2026-08-12T09:59:58.000Z";
+  assert.doesNotThrow(() => validateCompletedSepoliaResult(reversedUtc));
 });
 
 test("distinguishes unchanged source, a real diff, and git command errors", () => {

@@ -19,6 +19,7 @@
 - The aggregate gas ceiling is exactly `16500000`; the maximum amount in wei is calculated from fresh fee data and requires explicit user approval before execution.
 - Record warm-up transactions and their cost in raw data, but exclude them from descriptive statistics.
 - Report all five recorded values plus median and min-max only; do not calculate p95 or inferential statistics.
+- New Sepolia and matched-Hardhat evidence uses schema version `2` with series-relative monotonic offsets. Preserve the historical partial schema-version-1 Sepolia artifact unchanged as diagnostic evidence only.
 - Never serialize the RPC URL, private key, cookies, environment-variable values, or authenticated application data.
 - Keep Sepolia outputs separate from `measurements/raw/gas-local-hardhat.csv` and from existing Hardhat tables. Do not use that legacy fresh-contract CSV for the coordinated comparison; use the matched Hardhat JSON and its sibling checksum.
 - Commit hashes may exist only in raw research metadata, never in thesis prose, tables, captions, or bibliography entries.
@@ -153,6 +154,8 @@ export interface BenchmarkTransactionRecord {
   sequenceInRound: number | null;
   status: "pending" | "confirmed";
   transactionHash: string;
+  nonce: number;
+  broadcastAcknowledged: boolean;
   blockNumber: number | null;
   receiptStatus: number | null;
   confirmationsRequested: 1;
@@ -165,8 +168,12 @@ export interface BenchmarkTransactionRecord {
   actualFeeWei: string | null;
   worstCaseFeeWei: string;
   submittedAtUtc: string;
+  broadcastAtUtc: string | null;
   receiptAtUtc: string | null;
-  submissionMs: number;
+  startedOffsetMs: number;
+  broadcastOffsetMs: number | null;
+  receiptOffsetMs: number | null;
+  submissionMs: number | null;
   confirmationMs: number | null;
   endToEndMs: number | null;
 }
@@ -208,7 +215,7 @@ test("blocks the next transaction before the approved maximum can be exceeded", 
 
 - [ ] **Step 2: Add failing tests for fee arithmetic, monotonic durations, timeout, and secrets**
 
-Use a literal confirmed-record fixture with `startedMs: 100`, `broadcastMs: 125`, `receiptMs: 1125`, `gasUsed: 94_309n`, and `effectiveGasPriceWei: 1_108_566_493n`. Assert submission `25`, confirmation `1000`, end-to-end `1025`, and exact fee `104_547_797_388_337` wei. Assert `withTimeout(new Promise(() => {}), 5)` rejects with `receipt timeout`, and assert a record containing either the key `privateKey` or literal value `https://secret-rpc.invalid/key` is rejected.
+Use a literal confirmed-record fixture with `startedOffsetMs: 100`, `broadcastOffsetMs: 125`, `receiptOffsetMs: 1125`, `gasUsed: 94_309n`, and `effectiveGasPriceWei: 1_108_566_493n`. Assert submission `25`, confirmation `1000`, end-to-end `1025`, and exact fee `104_547_797_388_337` wei. Assert `withTimeout(new Promise(() => {}), 5)` rejects with `receipt timeout`, and assert a record containing either the key `privateKey` or literal value `https://secret-rpc.invalid/key` is rejected.
 
 - [ ] **Step 3: Run the focused test and verify RED**
 
@@ -281,7 +288,7 @@ export interface BenchmarkRoundAggregate {
 }
 
 export interface SepoliaBenchmarkResult {
-  schemaVersion: 1;
+  schemaVersion: 2;
   seriesId: string;
   startedAtUtc: string;
   completedAtUtc: string | null;
@@ -479,6 +486,11 @@ Deploy the individual contract first and the Merkle contract second. Populate an
 
 For each round `0` through `5`, execute its ten individual operations on the individual contract, then execute its one Merkle operation on the Merkle contract. Capture monotonic times with `performance.now()` and UTC timestamps with `new Date().toISOString()`. Use `withTimeout(transaction.wait(1), 600_000)`; on timeout retain the pending record and abort without sending another transaction.
 
+Capture one monotonic origin for the series. Paid transaction records store
+`startedOffsetMs`, `broadcastOffsetMs`, and `receiptOffsetMs`; durations and
+round `wallClockMs` are derived only from those offsets. UTC timestamps are
+parseable audit context but are never latency inputs.
+
 Add this exact script entry:
 
 ```json
@@ -522,7 +534,9 @@ It requires `GAS_BENCHMARK_COMMIT`, accepts an optional
 `measurements/raw/hardhat-sepolia-matched/`, and prints the exact raw path,
 checksum path, and digest. Every submitted transaction uses the fixed gas limit
 from the canonical plan and records the actual response gas limit and strategy
-contract address.
+contract address. New matched evidence uses schema version `2`, stores
+`startedOffsetMs` and `receiptOffsetMs` per transaction, and derives both
+transaction duration and round wall-clock duration solely from those offsets.
 
 **Files:**
 - Create: `scripts/analyze-sepolia-benchmark.mjs`
@@ -538,6 +552,7 @@ Use these analysis contracts:
 ```js
 // Documented shapes; implementation remains plain JavaScript.
 MatchedHardhatReference = {
+  schemaVersion: 2,
   kind: "hardhat-sepolia-matched",
   status: "completed",
   network: "hardhat",
@@ -574,15 +589,15 @@ SepoliaBenchmarkSummary = {
   recordedRounds: 5,
   individual: {
     totalGas: { observations: string[5], statistics: { count: 5, min: string, median: string, max: string } },
-    gasPerModel: { count: 5, min: number, median: number, max: number },
-    roundEndToEndMs: { count: 5, min: number, median: number, max: number },
+    gasPerModel: { observations: number[5], statistics: { count: 5, min: number, median: number, max: number } },
+    roundEndToEndMs: { observations: number[5], statistics: { count: 5, min: number, median: number, max: number } },
     actualFeeWei: { observations: string[5], statistics: object },
     actualFeeEth: { observations: string[5], statistics: object }
   },
   merkle: {
     totalGas: { observations: string[5], statistics: { count: 5, min: string, median: string, max: string } },
-    gasPerModel: { count: 5, min: number, median: number, max: number },
-    roundEndToEndMs: { count: 5, min: number, median: number, max: number },
+    gasPerModel: { observations: number[5], statistics: { count: 5, min: number, median: number, max: number } },
+    roundEndToEndMs: { observations: number[5], statistics: { count: 5, min: number, median: number, max: number } },
     actualFeeWei: { observations: string[5], statistics: object },
     actualFeeEth: { observations: string[5], statistics: object }
   },
@@ -621,7 +636,7 @@ Expected: FAIL because the analyzer module does not exist.
 
 - [ ] **Step 4: Implement strict raw validation and descriptive statistics**
 
-Validation requires network `sepolia`, chain ID `11155111`, status `completed`, 68 confirmed status-one transactions, ten-model batch size, one warm-up, five recorded rounds, two addresses, and arithmetic agreement among receipt gas, receipt fees, round totals, and experiment totals. `summarizeFive` sorts a copy and returns the middle value as median.
+Validation requires schema version `2`, network `sepolia`, chain ID `11155111`, status `completed`, 68 confirmed status-one transactions, contiguous nonces from the observed first nonce, complete broadcast evidence, ten-model batch size, one warm-up, five recorded rounds, two addresses, gas and fee bounds, exact duration equations, and arithmetic agreement among receipt gas, receipt fees, reconstructed round latency, round totals, and experiment totals. Completed schema-version-1 evidence is rejected with a legacy diagnostic-only message. `summarizeFive` sorts a copy and returns the middle value as median.
 
 - [ ] **Step 5: Implement matched Hardhat reference and source-version limitation**
 

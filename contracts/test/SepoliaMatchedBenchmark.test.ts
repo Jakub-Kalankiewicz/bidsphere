@@ -21,7 +21,7 @@ describe("Sepolia-matched Hardhat benchmark", () => {
     const rawBytes = await readFile(outputPath);
     const checksum = await readFile(`${outputPath}.sha256`, "utf8");
 
-    expect(result.schemaVersion).to.equal(1);
+    expect(result.schemaVersion).to.equal(2);
     expect(result.kind).to.equal("hardhat-sepolia-matched");
     expect(result.status).to.equal("completed");
     expect(result.network).to.equal("hardhat");
@@ -48,6 +48,11 @@ describe("Sepolia-matched Hardhat benchmark", () => {
       const expectedAddress = result.contractAddresses[transaction.strategy];
       expect(transaction.contractAddress).to.equal(expectedAddress);
       expect(transaction.gasLimit).to.equal(result.plannedOperations[index].gasLimit);
+      expect(transaction.startedOffsetMs).to.be.a("number").and.at.least(0);
+      expect(transaction.receiptOffsetMs).to.be.at.least(transaction.startedOffsetMs);
+      expect(transaction.endToEndMs).to.equal(
+        transaction.receiptOffsetMs - transaction.startedOffsetMs
+      );
       const submitted = await ethers.provider.getTransaction(transaction.transactionHash);
       expect(submitted?.gasLimit.toString()).to.equal(transaction.gasLimit);
       if (transaction.kind !== "merkle-registration") {
@@ -71,6 +76,15 @@ describe("Sepolia-matched Hardhat benchmark", () => {
         [5, 6],
       ]);
     expect(result.finalMerkleBatchCount).to.equal(6);
+    for (const round of result.rounds) {
+      const records = result.transactions.filter(
+        (record) => record.strategy === round.strategy && record.round === round.round
+      );
+      const expected =
+        Math.max(...records.map((record) => record.receiptOffsetMs)) -
+        Math.min(...records.map((record) => record.startedOffsetMs));
+      expect(round.wallClockMs).to.equal(expected);
+    }
   });
 
   it("uses the required commit variable, computes the default path, and prints all evidence coordinates", () => {

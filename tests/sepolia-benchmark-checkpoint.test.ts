@@ -44,7 +44,7 @@ after(async () => {
 
 function createRunningResult(): SepoliaBenchmarkResult {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     seriesId: "series-checkpoint",
     startedAtUtc: "2026-08-12T10:00:00.000Z",
     completedAtUtc: null,

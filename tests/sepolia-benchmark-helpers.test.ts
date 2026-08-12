@@ -118,6 +118,7 @@ test("records a nonce and worst-case reservation before broadcast acknowledgemen
     maxFeePerGasWei: 2_000_000_000n,
     maxPriorityFeePerGasWei: 1_000_000_000n,
     submittedAtUtc: "2026-08-12T10:00:00.000Z",
+    startedOffsetMs: 100,
   });
 
   assert.equal(intent.status, "pending");
@@ -130,12 +131,13 @@ test("records a nonce and worst-case reservation before broadcast acknowledgemen
 
   const acknowledged = acknowledgeTransactionBroadcast(intent, {
     broadcastAtUtc: "2026-08-12T10:00:00.025Z",
-    startedMs: 100,
-    broadcastMs: 125,
+    broadcastOffsetMs: 125,
   });
   assert.equal(acknowledged.broadcastAcknowledged, true);
   assert.equal(acknowledged.broadcastAtUtc, "2026-08-12T10:00:00.025Z");
   assert.equal(acknowledged.submissionMs, 25);
+  assert.equal(acknowledged.startedOffsetMs, 100);
+  assert.equal(acknowledged.broadcastOffsetMs, 125);
   assert.equal(acknowledged.transactionHash, intent.transactionHash);
   assert.equal(acknowledged.nonce, intent.nonce);
 });
@@ -155,9 +157,9 @@ test("builds serializable records with monotonic confirmed durations", () => {
     submittedAtUtc: "2026-08-12T10:00:00.000Z",
     broadcastAtUtc: "2026-08-12T10:00:00.025Z",
     receiptAtUtc: "2026-08-12T10:00:01.000Z",
-    startedMs: 100,
-    broadcastMs: 125,
-    receiptMs: 1125,
+    startedOffsetMs: 100,
+    broadcastOffsetMs: 125,
+    receiptOffsetMs: 1125,
   });
 
   assert.deepEqual(record, {
@@ -185,6 +187,9 @@ test("builds serializable records with monotonic confirmed durations", () => {
     submittedAtUtc: "2026-08-12T10:00:00.000Z",
     broadcastAtUtc: "2026-08-12T10:00:00.025Z",
     receiptAtUtc: "2026-08-12T10:00:01.000Z",
+    startedOffsetMs: 100,
+    broadcastOffsetMs: 125,
+    receiptOffsetMs: 1125,
     submissionMs: 25,
     confirmationMs: 1000,
     endToEndMs: 1025,
@@ -267,6 +272,9 @@ test("aggregates ten confirmed individual transactions into one round", () => {
     submittedAtUtc: new Date(value.submittedMs).toISOString(),
     broadcastAtUtc: new Date(value.submittedMs + 25).toISOString(),
     receiptAtUtc: new Date(value.receiptMs).toISOString(),
+    startedOffsetMs: value.submittedMs,
+    broadcastOffsetMs: value.submittedMs + 25,
+    receiptOffsetMs: value.receiptMs,
     submissionMs: 25,
     confirmationMs: value.receiptMs - value.submittedMs - 25,
     endToEndMs: value.receiptMs - value.submittedMs,
@@ -298,9 +306,9 @@ test("reserves only the worst-case cost of pending transactions", () => {
     submittedAtUtc: "2026-08-12T10:00:00.000Z",
     broadcastAtUtc: "2026-08-12T10:00:00.000Z",
     receiptAtUtc: "2026-08-12T10:00:00.001Z",
-    startedMs: 100,
-    broadcastMs: 100,
-    receiptMs: 101,
+    startedOffsetMs: 100,
+    broadcastOffsetMs: 100,
+    receiptOffsetMs: 101,
   });
   const pending: BenchmarkTransactionRecord = {
     ...confirmed,
@@ -350,9 +358,9 @@ function createConfirmedPlanRecords(): BenchmarkTransactionRecord[] {
       submittedAtUtc: new Date(index).toISOString(),
       broadcastAtUtc: new Date(index).toISOString(),
       receiptAtUtc: new Date(index + 1).toISOString(),
-      startedMs: index,
-      broadcastMs: index,
-      receiptMs: index + 1,
+      startedOffsetMs: index,
+      broadcastOffsetMs: index,
+      receiptOffsetMs: index + 1,
     })
   );
 }
@@ -636,6 +644,20 @@ test("derives twelve correctly sized round aggregates instead of trusting input"
   assert.equal(missingInputRound.rounds[0].transactionCount, 10);
   assert.equal(malformedInputRound.rounds.length, 12);
   assert.equal(malformedInputRound.rounds[0].transactionCount, 10);
+});
+
+test("recomputes round wall-clock duration from monotonic transaction offsets", () => {
+  const completable = createCompletableResult();
+  const forgedRounds = completable.rounds.map((round, index) =>
+    index === 0 ? { ...round, wallClockMs: 999_999 } : round
+  );
+
+  const completed = completeBenchmarkResult(
+    { ...completable, rounds: forgedRounds },
+    864n
+  );
+
+  assert.equal(completed.rounds[0].wallClockMs, 10);
 });
 
 test("aborts while preserving confirmed totals and pending reservation", () => {

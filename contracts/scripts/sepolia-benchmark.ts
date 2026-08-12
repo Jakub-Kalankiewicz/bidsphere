@@ -82,8 +82,7 @@ function sanitizeErrorMessage(
 
 function updateRunningResultAfterReceipt(
   result: SepoliaBenchmarkResult,
-  confirmed: BenchmarkTransactionRecord,
-  roundWallClockMs: number | null
+  confirmed: BenchmarkTransactionRecord
 ): SepoliaBenchmarkResult {
   const transactions = result.transactions.map((record) =>
     record.operationId === confirmed.operationId ? confirmed : record
@@ -97,10 +96,7 @@ function updateRunningResultAfterReceipt(
         record.round === confirmed.round
     );
     const derivedAggregate = aggregateRound(roundRecords);
-    const aggregate = {
-      ...derivedAggregate,
-      wallClockMs: roundWallClockMs ?? derivedAggregate.wallClockMs,
-    };
+    const aggregate = derivedAggregate;
     const existingIndex = rounds.findIndex(
       (round) =>
         round.strategy === confirmed.strategy && round.round === confirmed.round
@@ -212,6 +208,7 @@ async function main(): Promise<void> {
       process.env.SEPOLIA_BENCHMARK_RPC_PROVIDER_LABEL
     );
     const startedAtUtc = new Date().toISOString();
+    const seriesMonotonicOriginMs = performance.now();
     const seriesId = createBenchmarkSeriesId(new Date(startedAtUtc));
     const operations = buildBenchmarkOperationPlan(seriesId);
     const balanceBeforeWei = await ethers.provider.getBalance(deployer.address);
@@ -241,7 +238,6 @@ async function main(): Promise<void> {
     const factory = await ethers.getContractFactory("ModelRegistry", deployer);
     let individualContractAddress: string | null = null;
     let merkleContractAddress: string | null = null;
-    const roundStartedAtMs = new Map<string, number>();
 
     for (const operation of operations) {
       const feeData = await ethers.provider.getFeeData();
@@ -284,21 +280,14 @@ async function main(): Promise<void> {
         maxFeePerGas: maxFeePerGasWei,
         maxPriorityFeePerGas: maxPriorityFeePerGasWei,
       };
-      const startedMs = performance.now();
-      const roundKey =
-        operation.round === null
-          ? null
-          : `${operation.strategy}:${operation.round}`;
-      if (roundKey && !roundStartedAtMs.has(roundKey)) {
-        roundStartedAtMs.set(roundKey, startedMs);
-      }
+      const startedOffsetMs = performance.now() - seriesMonotonicOriginMs;
       const submittedAtUtc = new Date().toISOString();
       const populatedTransaction = await deployer.populateTransaction({
         ...prepared.transactionRequest,
         ...overrides,
       });
       let pending: BenchmarkTransactionRecord | null = null;
-      let broadcastMs: number | null = null;
+      let broadcastOffsetMs: number | null = null;
       let broadcastAtUtc: string | null = null;
       const broadcast = await persistThenBroadcastTransaction({
         populatedTransaction,
@@ -317,6 +306,7 @@ async function main(): Promise<void> {
             maxFeePerGasWei,
             maxPriorityFeePerGasWei,
             submittedAtUtc,
+            startedOffsetMs,
           });
           const checkpointResult = result as SepoliaBenchmarkResult;
           result = {
@@ -337,12 +327,11 @@ async function main(): Promise<void> {
           if (!pending || pending.transactionHash !== intent.transactionHash) {
             throw new Error("Broadcast acknowledgement has no matching intent");
           }
-          broadcastMs = performance.now();
+          broadcastOffsetMs = performance.now() - seriesMonotonicOriginMs;
           broadcastAtUtc = new Date().toISOString();
           pending = acknowledgeTransactionBroadcast(pending, {
             broadcastAtUtc,
-            startedMs,
-            broadcastMs,
+            broadcastOffsetMs,
           });
           const checkpointResult = result as SepoliaBenchmarkResult;
           result = {
@@ -358,7 +347,7 @@ async function main(): Promise<void> {
           );
         },
       });
-      if (!pending || broadcastMs === null || broadcastAtUtc === null) {
+      if (!pending || broadcastOffsetMs === null || broadcastAtUtc === null) {
         throw new Error("Broadcast acknowledgement is incomplete");
       }
       const acknowledgedPending = (
@@ -385,7 +374,7 @@ async function main(): Promise<void> {
         SEPOLIA_BENCHMARK_CONFIG.receiptTimeoutMs
       );
       if (!receipt) throw new Error("Transaction receipt is unavailable");
-      const receiptMs = performance.now();
+      const receiptOffsetMs = performance.now() - seriesMonotonicOriginMs;
       const receiptAtUtc = new Date().toISOString();
       const confirmed = buildConfirmedTransactionRecord({
         operation,
@@ -401,18 +390,11 @@ async function main(): Promise<void> {
         submittedAtUtc,
         broadcastAtUtc,
         receiptAtUtc,
-        startedMs,
-        broadcastMs,
-        receiptMs,
+        startedOffsetMs,
+        broadcastOffsetMs,
+        receiptOffsetMs,
       });
-      const roundWallClockMs = roundKey
-        ? receiptMs - (roundStartedAtMs.get(roundKey) ?? startedMs)
-        : null;
-      result = updateRunningResultAfterReceipt(
-        result,
-        confirmed,
-        roundWallClockMs
-      );
+      result = updateRunningResultAfterReceipt(result, confirmed);
       if (confirmed.receiptStatus === 1 && operation.kind === "deployment") {
         const address = receipt.contractAddress;
         if (!address) throw new Error("Deployment receipt did not return an address");

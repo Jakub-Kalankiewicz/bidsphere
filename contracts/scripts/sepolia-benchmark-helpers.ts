@@ -57,6 +57,9 @@ export interface BenchmarkTransactionRecord {
   submittedAtUtc: string;
   broadcastAtUtc: string | null;
   receiptAtUtc: string | null;
+  startedOffsetMs: number;
+  broadcastOffsetMs: number | null;
+  receiptOffsetMs: number | null;
   submissionMs: number | null;
   confirmationMs: number | null;
   endToEndMs: number | null;
@@ -73,7 +76,7 @@ export interface BenchmarkRoundAggregate {
 }
 
 export interface SepoliaBenchmarkResult {
-  schemaVersion: 1;
+  schemaVersion: 2;
   seriesId: string;
   startedAtUtc: string;
   completedAtUtc: string | null;
@@ -130,9 +133,9 @@ export interface BuildConfirmedTransactionRecordInput {
   submittedAtUtc: string;
   broadcastAtUtc: string;
   receiptAtUtc: string;
-  startedMs: number;
-  broadcastMs: number;
-  receiptMs: number;
+  startedOffsetMs: number;
+  broadcastOffsetMs: number;
+  receiptOffsetMs: number;
 }
 
 export interface BuildPreBroadcastTransactionRecordInput {
@@ -143,6 +146,7 @@ export interface BuildPreBroadcastTransactionRecordInput {
   maxFeePerGasWei: bigint;
   maxPriorityFeePerGasWei: bigint;
   submittedAtUtc: string;
+  startedOffsetMs: number;
 }
 
 export interface SepoliaBenchmarkPreflightReport {
@@ -510,6 +514,9 @@ export function buildPreBroadcastTransactionRecord(
     submittedAtUtc: input.submittedAtUtc,
     broadcastAtUtc: null,
     receiptAtUtc: null,
+    startedOffsetMs: input.startedOffsetMs,
+    broadcastOffsetMs: null,
+    receiptOffsetMs: null,
     submissionMs: null,
     confirmationMs: null,
     endToEndMs: null,
@@ -518,12 +525,12 @@ export function buildPreBroadcastTransactionRecord(
 
 export function acknowledgeTransactionBroadcast(
   record: BenchmarkTransactionRecord,
-  timing: { broadcastAtUtc: string; startedMs: number; broadcastMs: number }
+  timing: { broadcastAtUtc: string; broadcastOffsetMs: number }
 ): BenchmarkTransactionRecord {
   if (
     record.status !== "pending" ||
     record.broadcastAcknowledged ||
-    timing.broadcastMs < timing.startedMs
+    timing.broadcastOffsetMs < record.startedOffsetMs
   ) {
     throw new Error("Transaction broadcast acknowledgement is invalid");
   }
@@ -531,7 +538,8 @@ export function acknowledgeTransactionBroadcast(
     ...record,
     broadcastAcknowledged: true,
     broadcastAtUtc: timing.broadcastAtUtc,
-    submissionMs: timing.broadcastMs - timing.startedMs,
+    broadcastOffsetMs: timing.broadcastOffsetMs,
+    submissionMs: timing.broadcastOffsetMs - record.startedOffsetMs,
   };
 }
 
@@ -552,18 +560,19 @@ export function aggregateRound(
         record.gasUsed === null ||
         record.actualFeeWei === null ||
         record.receiptAtUtc === null ||
+        record.receiptOffsetMs === null ||
         record.endToEndMs === null
     )
   ) {
     throw new Error("A round aggregate requires matching confirmed transactions");
   }
-  const startedTimes = records.map((record) => Date.parse(record.submittedAtUtc));
-  const receiptTimes = records.map((record) => Date.parse(record.receiptAtUtc!));
+  const startedTimes = records.map((record) => record.startedOffsetMs);
+  const receiptTimes = records.map((record) => record.receiptOffsetMs!);
   const roundStartedMs = Math.min(...startedTimes);
   const roundReceiptMs = Math.max(...receiptTimes);
   if (
-    startedTimes.some((time) => !Number.isFinite(time)) ||
-    receiptTimes.some((time) => !Number.isFinite(time)) ||
+    startedTimes.some((time) => !Number.isFinite(time) || time < 0) ||
+    receiptTimes.some((time) => !Number.isFinite(time) || time < 0) ||
     roundReceiptMs < roundStartedMs
   ) {
     throw new Error("A round aggregate requires valid chronological timestamps");
@@ -621,15 +630,7 @@ function deriveBenchmarkProgress(result: SepoliaBenchmarkResult): Pick<
       );
       if (records.length > 0) {
         const aggregate = aggregateRound(records);
-        const existing = result.rounds.find(
-          (candidate) =>
-            candidate.strategy === strategy &&
-            candidate.round === round &&
-            candidate.transactionCount === records.length
-        );
-        rounds.push(
-          existing ? { ...aggregate, wallClockMs: existing.wallClockMs } : aggregate
-        );
+        rounds.push(aggregate);
       }
     }
   }
@@ -651,7 +652,7 @@ export function createInitialBenchmarkResult(
   }
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     seriesId: metadata.seriesId,
     startedAtUtc: metadata.startedAtUtc,
     completedAtUtc: null,
@@ -827,12 +828,15 @@ export function abortBenchmarkResult(
 export function buildConfirmedTransactionRecord(
   input: BuildConfirmedTransactionRecordInput
 ): BenchmarkTransactionRecord {
-  if (input.broadcastMs < input.startedMs || input.receiptMs < input.broadcastMs) {
+  if (
+    input.broadcastOffsetMs < input.startedOffsetMs ||
+    input.receiptOffsetMs < input.broadcastOffsetMs
+  ) {
     throw new Error("Transaction timings must be monotonic");
   }
-  const submissionMs = input.broadcastMs - input.startedMs;
-  const confirmationMs = input.receiptMs - input.broadcastMs;
-  const endToEndMs = input.receiptMs - input.startedMs;
+  const submissionMs = input.broadcastOffsetMs - input.startedOffsetMs;
+  const confirmationMs = input.receiptOffsetMs - input.broadcastOffsetMs;
+  const endToEndMs = input.receiptOffsetMs - input.startedOffsetMs;
   const actualFeeWei = calculateActualFee(input.gasUsed, input.effectiveGasPriceWei);
 
   return {
@@ -860,6 +864,9 @@ export function buildConfirmedTransactionRecord(
     submittedAtUtc: input.submittedAtUtc,
     broadcastAtUtc: input.broadcastAtUtc,
     receiptAtUtc: input.receiptAtUtc,
+    startedOffsetMs: input.startedOffsetMs,
+    broadcastOffsetMs: input.broadcastOffsetMs,
+    receiptOffsetMs: input.receiptOffsetMs,
     submissionMs,
     confirmationMs,
     endToEndMs,

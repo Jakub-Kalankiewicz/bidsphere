@@ -33,6 +33,8 @@ interface MatchedTransactionRecord {
   actualFeeWei: string;
   submittedAtUtc: string;
   receiptAtUtc: string;
+  startedOffsetMs: number;
+  receiptOffsetMs: number;
   endToEndMs: number;
   batchCountBefore: number | null;
   batchCountAfter: number | null;
@@ -49,7 +51,7 @@ interface MatchedRoundAggregate {
 }
 
 export interface SepoliaMatchedHardhatResult {
-  schemaVersion: 1;
+  schemaVersion: 2;
   kind: "hardhat-sepolia-matched";
   status: "completed";
   seriesId: string;
@@ -122,8 +124,8 @@ function aggregateRounds(records: MatchedTransactionRecord[]): MatchedRoundAggre
       const selected = records.filter(
         (record) => record.strategy === strategy && record.round === round
       );
-      const started = selected.map((record) => Date.parse(record.submittedAtUtc));
-      const completed = selected.map((record) => Date.parse(record.receiptAtUtc));
+      const started = selected.map((record) => record.startedOffsetMs);
+      const completed = selected.map((record) => record.receiptOffsetMs);
       rounds.push({
         strategy,
         round,
@@ -156,6 +158,7 @@ export async function runSepoliaMatchedBenchmark(
   }
 
   const startedAtUtc = new Date().toISOString();
+  const seriesMonotonicOriginMs = performance.now();
   const operations = buildBenchmarkOperationPlan(benchmarkSeriesId);
   const factory = await ethers.getContractFactory("ModelRegistry");
   const artifact = await artifacts.readArtifact("ModelRegistry");
@@ -166,7 +169,7 @@ export async function runSepoliaMatchedBenchmark(
 
   for (const operation of operations) {
     const submittedAtUtc = new Date().toISOString();
-    const startedMs = performance.now();
+    const startedOffsetMs = performance.now() - seriesMonotonicOriginMs;
     let response;
     let countBefore: number | null = null;
     let contractAddress: string | null = null;
@@ -208,6 +211,7 @@ export async function runSepoliaMatchedBenchmark(
       throw new Error(`Operation ${operation.operationId} did not produce a status-one receipt`);
     }
     const receiptAtUtc = new Date().toISOString();
+    const receiptOffsetMs = performance.now() - seriesMonotonicOriginMs;
     const gasPrice = receipt.gasPrice;
     let countAfter: number | null = null;
     if (operation.kind === "deployment") {
@@ -244,7 +248,9 @@ export async function runSepoliaMatchedBenchmark(
       actualFeeWei: (receipt.gasUsed * gasPrice).toString(),
       submittedAtUtc,
       receiptAtUtc,
-      endToEndMs: performance.now() - startedMs,
+      startedOffsetMs,
+      receiptOffsetMs,
+      endToEndMs: receiptOffsetMs - startedOffsetMs,
       batchCountBefore: countBefore,
       batchCountAfter: countAfter,
     });
@@ -267,7 +273,7 @@ export async function runSepoliaMatchedBenchmark(
   if (finalMerkleBatchCount !== 6) throw new Error("Merkle batch count must finish at six");
 
   const result: SepoliaMatchedHardhatResult = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     kind: "hardhat-sepolia-matched",
     status: "completed",
     seriesId: benchmarkSeriesId,
