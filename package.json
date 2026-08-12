@@ -14,7 +14,7 @@
     "lint": "eslint .",
     "create:offline-fixture": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/create-offline-fixture.mjs",
     "fixture:offline": "node scripts/rebuild-offline-fixture.mjs",
-    "test:verify": "npm run build:verifier && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/blockchain-config.test.ts tests/deployment-output.test.ts tests/offline-fixture-builder.test.mjs tests/sepolia-smoke-helpers.test.ts tests/verify-core.test.mjs tests/verify-fixture.test.mjs tests/verify-html-security.test.mjs tests/sepolia-benchmark-helpers.test.ts tests/sepolia-benchmark-checkpoint.test.ts tests/sepolia-benchmark-analysis.test.mjs",
+    "test:verify": "npm run build:verifier && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/blockchain-config.test.ts tests/deployment-output.test.ts tests/offline-fixture-builder.test.mjs tests/sepolia-smoke-helpers.test.ts tests/verify-core.test.mjs tests/verify-fixture.test.mjs tests/verify-html-security.test.mjs tests/sepolia-benchmark-helpers.test.ts tests/sepolia-benchmark-checkpoint.test.ts tests/sepolia-benchmark-transaction.test.ts tests/sepolia-benchmark-analysis.test.mjs",
     "test:benchmark": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/benchmark.test.ts tests/blockchain-lookup.test.ts tests/merkle-browser.test.ts",
     "test:merkle": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test lib/merkle.test.ts",
     "analyze:benchmark": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/analyze-benchmark.ts",

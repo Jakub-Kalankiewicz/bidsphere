@@ -6,9 +6,11 @@ import {
   abortBenchmarkResult,
   assertNextTransactionWithinBudget,
   assertSecretFree,
+  acknowledgeTransactionBroadcast,
   buildBenchmarkPreflightReport,
   buildBenchmarkOperationPlan,
   buildConfirmedTransactionRecord,
+  buildPreBroadcastTransactionRecord,
   calculateActualFee,
   calculateAggregateGasCeiling,
   calculateReservedPendingWei,
@@ -105,10 +107,44 @@ test("calculates the exact fee from the confirmed receipt", () => {
   assert.equal(calculateActualFee(94_309n, 1_108_566_493n), 104_547_797_388_337n);
 });
 
+test("records a nonce and worst-case reservation before broadcast acknowledgement", () => {
+  const operation = buildBenchmarkOperationPlan("series-fixed")[2];
+  const intent = buildPreBroadcastTransactionRecord({
+    operation,
+    transactionHash:
+      "0x45595492db6dcf70c9e05cacdf414e080ce63a407eb78cb65bf0082e9f0f9b8b",
+    nonce: 8,
+    gasEstimate: 100_000n,
+    maxFeePerGasWei: 2_000_000_000n,
+    maxPriorityFeePerGasWei: 1_000_000_000n,
+    submittedAtUtc: "2026-08-12T10:00:00.000Z",
+  });
+
+  assert.equal(intent.status, "pending");
+  assert.equal(intent.nonce, 8);
+  assert.equal(intent.broadcastAcknowledged, false);
+  assert.equal(intent.broadcastAtUtc, null);
+  assert.equal(intent.submissionMs, null);
+  assert.equal(intent.worstCaseFeeWei, "300000000000000");
+  assert.equal(calculateReservedPendingWei([intent]), 300_000_000_000_000n);
+
+  const acknowledged = acknowledgeTransactionBroadcast(intent, {
+    broadcastAtUtc: "2026-08-12T10:00:00.025Z",
+    startedMs: 100,
+    broadcastMs: 125,
+  });
+  assert.equal(acknowledged.broadcastAcknowledged, true);
+  assert.equal(acknowledged.broadcastAtUtc, "2026-08-12T10:00:00.025Z");
+  assert.equal(acknowledged.submissionMs, 25);
+  assert.equal(acknowledged.transactionHash, intent.transactionHash);
+  assert.equal(acknowledged.nonce, intent.nonce);
+});
+
 test("builds serializable records with monotonic confirmed durations", () => {
   const record = buildConfirmedTransactionRecord({
     operation: buildBenchmarkOperationPlan("series-fixed")[2],
     transactionHash: "0xabc",
+    nonce: 8,
     receiptStatus: 1,
     blockNumber: 123,
     gasEstimate: 100_000n,
@@ -117,6 +153,7 @@ test("builds serializable records with monotonic confirmed durations", () => {
     maxPriorityFeePerGasWei: 1_000_000_000n,
     effectiveGasPriceWei: 1_108_566_493n,
     submittedAtUtc: "2026-08-12T10:00:00.000Z",
+    broadcastAtUtc: "2026-08-12T10:00:00.025Z",
     receiptAtUtc: "2026-08-12T10:00:01.000Z",
     startedMs: 100,
     broadcastMs: 125,
@@ -132,6 +169,8 @@ test("builds serializable records with monotonic confirmed durations", () => {
     sequenceInRound: 0,
     status: "confirmed",
     transactionHash: "0xabc",
+    nonce: 8,
+    broadcastAcknowledged: true,
     blockNumber: 123,
     receiptStatus: 1,
     confirmationsRequested: 1,
@@ -144,6 +183,7 @@ test("builds serializable records with monotonic confirmed durations", () => {
     actualFeeWei: "104547797388337",
     worstCaseFeeWei: "300000000000000",
     submittedAtUtc: "2026-08-12T10:00:00.000Z",
+    broadcastAtUtc: "2026-08-12T10:00:00.025Z",
     receiptAtUtc: "2026-08-12T10:00:01.000Z",
     submissionMs: 25,
     confirmationMs: 1000,
@@ -211,6 +251,8 @@ test("aggregates ten confirmed individual transactions into one round", () => {
     sequenceInRound: index,
     status: "confirmed",
     transactionHash: `0x${index}`,
+    nonce: index,
+    broadcastAcknowledged: true,
     blockNumber: 100 + index,
     receiptStatus: 1,
     confirmationsRequested: 1,
@@ -223,6 +265,7 @@ test("aggregates ten confirmed individual transactions into one round", () => {
     actualFeeWei: value.actualFeeWei,
     worstCaseFeeWei: "2250000",
     submittedAtUtc: new Date(value.submittedMs).toISOString(),
+    broadcastAtUtc: new Date(value.submittedMs + 25).toISOString(),
     receiptAtUtc: new Date(value.receiptMs).toISOString(),
     submissionMs: 25,
     confirmationMs: value.receiptMs - value.submittedMs - 25,
@@ -244,6 +287,7 @@ test("reserves only the worst-case cost of pending transactions", () => {
   const confirmed = buildConfirmedTransactionRecord({
     operation: buildBenchmarkOperationPlan("series-fixed")[2],
     transactionHash: "0xconfirmed",
+    nonce: 8,
     receiptStatus: 1,
     blockNumber: 123,
     gasEstimate: 1n,
@@ -252,6 +296,7 @@ test("reserves only the worst-case cost of pending transactions", () => {
     maxPriorityFeePerGasWei: 0n,
     effectiveGasPriceWei: 1n,
     submittedAtUtc: "2026-08-12T10:00:00.000Z",
+    broadcastAtUtc: "2026-08-12T10:00:00.000Z",
     receiptAtUtc: "2026-08-12T10:00:00.001Z",
     startedMs: 100,
     broadcastMs: 100,
@@ -294,6 +339,7 @@ function createConfirmedPlanRecords(): BenchmarkTransactionRecord[] {
     buildConfirmedTransactionRecord({
       operation,
       transactionHash: `0x${index}`,
+      nonce: index,
       receiptStatus: 1,
       blockNumber: 1_000 + index,
       gasEstimate: 1n,
@@ -302,6 +348,7 @@ function createConfirmedPlanRecords(): BenchmarkTransactionRecord[] {
       maxPriorityFeePerGasWei: 1n,
       effectiveGasPriceWei: 2n,
       submittedAtUtc: new Date(index).toISOString(),
+      broadcastAtUtc: new Date(index).toISOString(),
       receiptAtUtc: new Date(index + 1).toISOString(),
       startedMs: index,
       broadcastMs: index,
@@ -460,6 +507,38 @@ test("requires transaction records in canonical operation order", () => {
         864n
       ),
     /operation topology/
+  );
+});
+
+test("requires acknowledged broadcasts with distinct nonces for completion", () => {
+  const completable = createCompletableResult();
+  const unacknowledged = [...completable.transactions];
+  unacknowledged[10] = {
+    ...unacknowledged[10],
+    broadcastAcknowledged: false,
+    broadcastAtUtc: null,
+  };
+  assert.throws(
+    () =>
+      completeBenchmarkResult(
+        { ...completable, transactions: unacknowledged },
+        864n
+      ),
+    /broadcast evidence/
+  );
+
+  const duplicateNonce = [...completable.transactions];
+  duplicateNonce[10] = {
+    ...duplicateNonce[10],
+    nonce: duplicateNonce[9].nonce,
+  };
+  assert.throws(
+    () =>
+      completeBenchmarkResult(
+        { ...completable, transactions: duplicateNonce },
+        864n
+      ),
+    /broadcast evidence/
   );
 });
 

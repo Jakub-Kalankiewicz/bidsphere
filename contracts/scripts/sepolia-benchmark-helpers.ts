@@ -41,6 +41,8 @@ export interface BenchmarkTransactionRecord {
   sequenceInRound: number | null;
   status: "pending" | "confirmed";
   transactionHash: string;
+  nonce: number;
+  broadcastAcknowledged: boolean;
   blockNumber: number | null;
   receiptStatus: number | null;
   confirmationsRequested: 1;
@@ -53,8 +55,9 @@ export interface BenchmarkTransactionRecord {
   actualFeeWei: string | null;
   worstCaseFeeWei: string;
   submittedAtUtc: string;
+  broadcastAtUtc: string | null;
   receiptAtUtc: string | null;
-  submissionMs: number;
+  submissionMs: number | null;
   confirmationMs: number | null;
   endToEndMs: number | null;
 }
@@ -116,6 +119,7 @@ export interface CreateInitialBenchmarkResultMetadata {
 export interface BuildConfirmedTransactionRecordInput {
   operation: BenchmarkOperation;
   transactionHash: string;
+  nonce: number;
   blockNumber: number;
   receiptStatus: number;
   gasEstimate: bigint;
@@ -124,10 +128,21 @@ export interface BuildConfirmedTransactionRecordInput {
   maxPriorityFeePerGasWei: bigint;
   effectiveGasPriceWei: bigint;
   submittedAtUtc: string;
+  broadcastAtUtc: string;
   receiptAtUtc: string;
   startedMs: number;
   broadcastMs: number;
   receiptMs: number;
+}
+
+export interface BuildPreBroadcastTransactionRecordInput {
+  operation: BenchmarkOperation;
+  transactionHash: string;
+  nonce: number;
+  gasEstimate: bigint;
+  maxFeePerGasWei: bigint;
+  maxPriorityFeePerGasWei: bigint;
+  submittedAtUtc: string;
 }
 
 export interface SepoliaBenchmarkPreflightReport {
@@ -465,6 +480,61 @@ export function calculateActualFee(gasUsed: bigint, effectiveGasPriceWei: bigint
   return gasUsed * effectiveGasPriceWei;
 }
 
+export function buildPreBroadcastTransactionRecord(
+  input: BuildPreBroadcastTransactionRecordInput
+): BenchmarkTransactionRecord {
+  return {
+    operationId: input.operation.operationId,
+    kind: input.operation.kind,
+    strategy: input.operation.strategy,
+    round: input.operation.round,
+    warmup: input.operation.warmup,
+    sequenceInRound: input.operation.sequenceInRound,
+    status: "pending",
+    transactionHash: input.transactionHash,
+    nonce: input.nonce,
+    broadcastAcknowledged: false,
+    blockNumber: null,
+    receiptStatus: null,
+    confirmationsRequested: 1,
+    gasEstimate: input.gasEstimate.toString(),
+    gasLimit: input.operation.gasLimit.toString(),
+    gasUsed: null,
+    maxFeePerGasWei: input.maxFeePerGasWei.toString(),
+    maxPriorityFeePerGasWei: input.maxPriorityFeePerGasWei.toString(),
+    effectiveGasPriceWei: null,
+    actualFeeWei: null,
+    worstCaseFeeWei: (
+      input.operation.gasLimit * input.maxFeePerGasWei
+    ).toString(),
+    submittedAtUtc: input.submittedAtUtc,
+    broadcastAtUtc: null,
+    receiptAtUtc: null,
+    submissionMs: null,
+    confirmationMs: null,
+    endToEndMs: null,
+  };
+}
+
+export function acknowledgeTransactionBroadcast(
+  record: BenchmarkTransactionRecord,
+  timing: { broadcastAtUtc: string; startedMs: number; broadcastMs: number }
+): BenchmarkTransactionRecord {
+  if (
+    record.status !== "pending" ||
+    record.broadcastAcknowledged ||
+    timing.broadcastMs < timing.startedMs
+  ) {
+    throw new Error("Transaction broadcast acknowledgement is invalid");
+  }
+  return {
+    ...record,
+    broadcastAcknowledged: true,
+    broadcastAtUtc: timing.broadcastAtUtc,
+    submissionMs: timing.broadcastMs - timing.startedMs,
+  };
+}
+
 export function aggregateRound(
   records: readonly BenchmarkTransactionRecord[]
 ): BenchmarkRoundAggregate {
@@ -651,12 +721,26 @@ export function completeBenchmarkResult(
   const transactionHashes = result.transactions.map((record) =>
     record.transactionHash.toLowerCase()
   );
+  const transactionNonces = result.transactions.map((record) => record.nonce);
   if (
     result.plannedOperations.length !== 68 ||
     new Set(transactionOperationIds).size !== 68 ||
     new Set(transactionHashes).size !== 68
   ) {
     throw new Error("Completion operation topology does not match the plan");
+  }
+  if (
+    new Set(transactionNonces).size !== 68 ||
+    result.transactions.some(
+      (record) =>
+        !record.broadcastAcknowledged ||
+        record.broadcastAtUtc === null ||
+        record.submissionMs === null ||
+        !Number.isSafeInteger(record.nonce) ||
+        record.nonce < 0
+    )
+  ) {
+    throw new Error("Completion broadcast evidence does not match the plan");
   }
   for (const [index, canonical] of canonicalOperations.entries()) {
     const planned = result.plannedOperations[index];
@@ -760,6 +844,8 @@ export function buildConfirmedTransactionRecord(
     sequenceInRound: input.operation.sequenceInRound,
     status: "confirmed",
     transactionHash: input.transactionHash,
+    nonce: input.nonce,
+    broadcastAcknowledged: true,
     blockNumber: input.blockNumber,
     receiptStatus: input.receiptStatus,
     confirmationsRequested: 1,
@@ -772,6 +858,7 @@ export function buildConfirmedTransactionRecord(
     actualFeeWei: actualFeeWei.toString(),
     worstCaseFeeWei: (input.operation.gasLimit * input.maxFeePerGasWei).toString(),
     submittedAtUtc: input.submittedAtUtc,
+    broadcastAtUtc: input.broadcastAtUtc,
     receiptAtUtc: input.receiptAtUtc,
     submissionMs,
     confirmationMs,
