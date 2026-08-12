@@ -1,0 +1,248 @@
+{
+  "source": "measurements/raw/gas-local-hardhat.csv",
+  "generatedAt": "2026-08-10T12:19:50.875Z",
+  "quantileMethod": "Hyndman-Fan type 7 (linear interpolation)",
+  "rows": 210,
+  "batchSizes": [
+    1,
+    2,
+    5,
+    10,
+    25,
+    50,
+    100
+  ],
+  "batches": [
+    {
+      "batchSize": 1,
+      "repetitions": 30,
+      "individualTotalGas": {
+        "count": 30,
+        "q1": 94213,
+        "median": 94213,
+        "q3": 94213,
+        "p95": 94213
+      },
+      "merkleBatchGas": {
+        "count": 30,
+        "q1": 163419,
+        "median": 163419,
+        "q3": 163419,
+        "p95": 163419
+      },
+      "individualGasPerModel": {
+        "count": 30,
+        "q1": 94213,
+        "median": 94213,
+        "q3": 94213,
+        "p95": 94213
+      },
+      "merkleGasPerModel": {
+        "count": 30,
+        "q1": 163419,
+        "median": 163419,
+        "q3": 163419,
+        "p95": 163419
+      },
+      "medianPerModelSavingPct": -73.4569539235562
+    },
+    {
+      "batchSize": 2,
+      "repetitions": 30,
+      "individualTotalGas": {
+        "count": 30,
+        "q1": 188426,
+        "median": 188426,
+        "q3": 188426,
+        "p95": 188426
+      },
+      "merkleBatchGas": {
+        "count": 30,
+        "q1": 210546,
+        "median": 210546,
+        "q3": 210546,
+        "p95": 210546
+      },
+      "individualGasPerModel": {
+        "count": 30,
+        "q1": 94213,
+        "median": 94213,
+        "q3": 94213,
+        "p95": 94213
+      },
+      "merkleGasPerModel": {
+        "count": 30,
+        "q1": 105273,
+        "median": 105273,
+        "q3": 105273,
+        "p95": 105273
+      },
+      "medianPerModelSavingPct": -11.73935656438072
+    },
+    {
+      "batchSize": 5,
+      "repetitions": 30,
+      "individualTotalGas": {
+        "count": 30,
+        "q1": 471065,
+        "median": 471065,
+        "q3": 471065,
+        "p95": 471065
+      },
+      "merkleBatchGas": {
+        "count": 30,
+        "q1": 351964,
+        "median": 351964,
+        "q3": 351964,
+        "p95": 351964
+      },
+      "individualGasPerModel": {
+        "count": 30,
+        "q1": 94213,
+        "median": 94213,
+        "q3": 94213,
+        "p95": 94213
+      },
+      "merkleGasPerModel": {
+        "count": 30,
+        "q1": 70392.8,
+        "median": 70392.8,
+        "q3": 70392.8,
+        "p95": 70392.8
+      },
+      "medianPerModelSavingPct": 25.283347308757808
+    },
+    {
+      "batchSize": 10,
+      "repetitions": 30,
+      "individualTotalGas": {
+        "count": 30,
+        "q1": 942130,
+        "median": 942130,
+        "q3": 942130,
+        "p95": 942130
+      },
+      "merkleBatchGas": {
+        "count": 30,
+        "q1": 587661,
+        "median": 587661,
+        "q3": 587661,
+        "p95": 587661
+      },
+      "individualGasPerModel": {
+        "count": 30,
+        "q1": 94213,
+        "median": 94213,
+        "q3": 94213,
+        "p95": 94213
+      },
+      "merkleGasPerModel": {
+        "count": 30,
+        "q1": 58766.1,
+        "median": 58766.1,
+        "q3": 58766.1,
+        "p95": 58766.1
+      },
+      "medianPerModelSavingPct": 37.62421321898252
+    },
+    {
+      "batchSize": 25,
+      "repetitions": 30,
+      "individualTotalGas": {
+        "count": 30,
+        "q1": 2355325,
+        "median": 2355325,
+        "q3": 2355325,
+        "p95": 2355325
+      },
+      "merkleBatchGas": {
+        "count": 30,
+        "q1": 1294781,
+        "median": 1294781,
+        "q3": 1294781,
+        "p95": 1294781
+      },
+      "individualGasPerModel": {
+        "count": 30,
+        "q1": 94213,
+        "median": 94213,
+        "q3": 94213,
+        "p95": 94213
+      },
+      "merkleGasPerModel": {
+        "count": 30,
+        "q1": 51791.24,
+        "median": 51791.24,
+        "q3": 51791.24,
+        "p95": 51791.24
+      },
+      "medianPerModelSavingPct": 45.02750151253012
+    },
+    {
+      "batchSize": 50,
+      "repetitions": 30,
+      "individualTotalGas": {
+        "count": 30,
+        "q1": 4710650,
+        "median": 4710650,
+        "q3": 4710650,
+        "p95": 4710650
+      },
+      "merkleBatchGas": {
+        "count": 30,
+        "q1": 2473148,
+        "median": 2473148,
+        "q3": 2473148,
+        "p95": 2473148
+      },
+      "individualGasPerModel": {
+        "count": 30,
+        "q1": 94213,
+        "median": 94213,
+        "q3": 94213,
+        "p95": 94213
+      },
+      "merkleGasPerModel": {
+        "count": 30,
+        "q1": 49462.96,
+        "median": 49462.96,
+        "q3": 49462.96,
+        "p95": 49462.96
+      },
+      "medianPerModelSavingPct": 47.49879528302888
+    },
+    {
+      "batchSize": 100,
+      "repetitions": 30,
+      "individualTotalGas": {
+        "count": 30,
+        "q1": 9421300,
+        "median": 9421300,
+        "q3": 9421300,
+        "p95": 9421300
+      },
+      "merkleBatchGas": {
+        "count": 30,
+        "q1": 4830079,
+        "median": 4830079,
+        "q3": 4830079,
+        "p95": 4830079
+      },
+      "individualGasPerModel": {
+        "count": 30,
+        "q1": 94213,
+        "median": 94213,
+        "q3": 94213,
+        "p95": 94213
+      },
+      "merkleGasPerModel": {
+        "count": 30,
+        "q1": 48300.79,
+        "median": 48300.79,
+        "q3": 48300.79,
+        "p95": 48300.79
+      },
+      "medianPerModelSavingPct": 48.73235116172927
+    }
+  ]
+}
