@@ -37,18 +37,38 @@ excluded from descriptive statistics.
 
 ## Local Reference
 
-The comparison source is `measurements/raw/gas-local-hardhat.csv`, restricted
-to batch size ten. The existing local measurements are approximately:
+The original thesis experiment remains represented by
+`measurements/raw/gas-local-hardhat.csv`. That CSV is valid evidence for its
+original fresh-contract-per-repetition design, but it is not used for a direct
+cross-environment comparison with this Sepolia series because its storage
+topology differs.
+
+The coordinated comparison instead uses a new Sepolia-matched Hardhat JSON
+reference. It replays the exact canonical 68-operation plan on two contracts
+that remain deployed for the whole series: one contract for all individual
+registrations and one for all Merkle registrations. It uses batch size ten,
+one warm-up round, five recorded rounds, unique model identifiers, and the
+same full 40-hex code-version identifier as the Sepolia artifact.
+
+The matched artifact records Hardhat chain ID 31337, runtime and Solidity
+compiler settings, the deployed runtime-bytecode Keccak-256, two public local
+contract addresses, 68 successful receipts, 12 round aggregates, and Merkle
+`batchCount` transitions `0 -> 1` through `5 -> 6`. After atomically replacing
+the final JSON, the writer hashes its exact bytes and atomically writes a
+sibling `<artifact>.sha256` containing lowercase 64-hex plus a newline.
+
+The existing local measurements are approximately:
 
 - individual registration: 942,130 gas for ten models;
 - Merkle registration: 587,661 gas for ten models;
 - observed reduction: approximately 37.6% of total gas for the Merkle
   strategy.
 
-The analysis must derive final reference values from the raw CSV rather than
-copying the approximate values above. Before comparison, it must confirm that
-the benchmark uses the same `ModelRegistry` contract behavior and report any
-known code-version difference as a limitation.
+Those approximate CSV values remain historical context only. The coordinated
+analysis derives all local comparison values from the matched JSON, verifies
+its sibling digest, requires identical code-version identifiers, validates the
+long-lived storage topology and all arithmetic, and does not claim deployed
+Sepolia bytecode identity from source equality.
 
 ## Execution Model
 
@@ -114,10 +134,14 @@ a new series instead of appending to or overwriting the previous one.
 
 A separate analysis step writes a derived summary under
 `measurements/processed/`. The raw artifact is never modified by analysis.
+Its three explicit CLI arguments are the Sepolia JSON, matched Hardhat JSON,
+and output summary. The sibling checksum is discovered as
+`<matched-hardhat.json>.sha256`; all four filesystem endpoints must be distinct
+after resolved-path, symbolic-link, and hard-link checks.
 
 ## Descriptive Analysis
 
-For five recorded rounds, the report includes:
+For five recorded rounds, in original round order, the report includes:
 
 - all observed values;
 - median and min-max range;
@@ -126,6 +150,11 @@ For five recorded rounds, the report includes:
 - individual-round and Merkle-round confirmation durations;
 - relative difference between the two strategies;
 - difference between Sepolia gas use and the local Hardhat reference.
+
+Gas and fee observations use exact decimal strings. Fee values are also
+rendered as deterministic decimal ETH strings. The processed summary includes
+the local series ID and artifact SHA-256, but excludes both code-version hashes
+(`source` and `localSource` are not output).
 
 The report does not calculate p95 or perform inferential hypothesis tests for
 five observations. Fee conversion to PLN or another currency is excluded
@@ -158,13 +187,17 @@ runner obtains current fee data and verifies that:
   not exceed the approved whole-experiment maximum;
 - the wallet balance covers the next worst-case cost.
 
-Any failed check stops before the next transaction. A receipt with a status
-other than one, an RPC failure, or an unexpected chain ID aborts the series and
-preserves the partial artifact. Receipt waiting has a ten-minute timeout. A
-timeout records the already-broadcast transaction as pending, stops before any
-later transaction, and retains that transaction's worst-case cost within the
-approved budget because it may still be mined. The runner never silently
-raises a gas or total-cost ceiling.
+Any failed check stops before the next transaction. Before broadcast, a
+connected local wallet populates and signs the transaction, then the exact
+hash, nonce and worst-case reservation are persisted. The provider receives
+the exact signed bytes once; the runner neither retries nor replaces them. A
+receipt with a status other than one, an RPC failure, a checkpoint failure, or
+an unexpected chain ID aborts the series and preserves the latest durable
+partial artifact. Receipt waiting has a ten-minute timeout. A timeout retains
+the already-broadcast transaction as pending, stops before any later
+transaction, and keeps that transaction's worst-case cost within the approved
+budget because it may still be mined. The runner never silently raises a gas
+or total-cost ceiling.
 
 The implementation uses these per-transaction ceilings:
 

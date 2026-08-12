@@ -4,7 +4,7 @@
 
 **Goal:** Build and run a bounded Sepolia experiment that compares individual and Merkle registration for batches of ten while recording gas, actual fees, and transaction-confirmation latency.
 
-**Architecture:** Keep deterministic planning, budget arithmetic, record construction, and analysis in pure helpers covered by Node tests. Use two thin Hardhat entry points: a read-only preflight and a separately authorized transaction runner with atomic checkpoints after every broadcast or receipt. Preserve raw Sepolia JSON separately from the existing local Hardhat CSV and derive a separate processed summary.
+**Architecture:** Keep deterministic planning, budget arithmetic, record construction, and analysis in pure helpers covered by Node tests. Use two thin Hardhat entry points: a read-only preflight and a separately authorized transaction runner with atomic checkpoints after every broadcast or receipt. Preserve raw Sepolia JSON separately. For coordinated cross-environment analysis, generate a free Hardhat JSON reference with the same two-long-lived-contract, 68-operation topology and an exact-byte sibling SHA-256; retain the legacy CSV only for the thesis's original experiment.
 
 **Tech Stack:** Node.js 24, TypeScript, Node test runner, Hardhat 2, ethers 6, Solidity, JSON research artifacts.
 
@@ -20,7 +20,7 @@
 - Record warm-up transactions and their cost in raw data, but exclude them from descriptive statistics.
 - Report all five recorded values plus median and min-max only; do not calculate p95 or inferential statistics.
 - Never serialize the RPC URL, private key, cookies, environment-variable values, or authenticated application data.
-- Keep Sepolia outputs separate from `measurements/raw/gas-local-hardhat.csv` and from existing Hardhat tables.
+- Keep Sepolia outputs separate from `measurements/raw/gas-local-hardhat.csv` and from existing Hardhat tables. Do not use that legacy fresh-contract CSV for the coordinated comparison; use the matched Hardhat JSON and its sibling checksum.
 - Commit hashes may exist only in raw research metadata, never in thesis prose, tables, captions, or bibliography entries.
 - Do not modify thesis chapters until the result is complete, reproducible, and separately approved by the user.
 - Preserve all unrelated untracked files; stage only exact files named by the current task.
@@ -506,26 +506,37 @@ git commit -m "feat: run bounded Sepolia gas latency benchmark"
 
 ### Task 6: Raw Validation and Descriptive Analysis
 
+Before analysis, run `contracts/scripts/benchmark-gas-sepolia-matched.ts` on
+Hardhat. It deploys exactly two contracts once, executes the same canonical 68
+operations as the Sepolia plan, requires 68 status-one receipts, records 12
+round aggregates and Merkle counter transitions, then atomically writes the
+final JSON and its exact-byte sibling SHA-256. Its focused real-contract tests
+must isolate the exact 17,100-gas first-versus-later Merkle counter effect and
+show that equivalent individual registrations have unchanged gas. It does not
+read Sepolia credentials, make network calls, or modify the paid runner.
+
 **Files:**
 - Create: `scripts/analyze-sepolia-benchmark.mjs`
 - Create: `tests/sepolia-benchmark-analysis.test.mjs`
 - Modify: `package.json`
 
 **Interfaces:**
-- Produces: `summarizeFive(values: number[]): { count: 5; min: number; median: number; max: number }`, `validateCompletedSepoliaResult(raw): void`, `parseLocalBatchTenCsv(csvText): LocalGasReference`, `compareRelevantContractSource(repositoryPath: string, localCommit: string, sepoliaCommit: string): SourceComparison`, and `analyzeSepoliaBenchmark(raw, localReference, sourceComparison): SepoliaBenchmarkSummary`.
-- CLI consumes exactly three paths: raw Sepolia JSON, local Hardhat CSV, and output summary JSON.
+- Produces: `summarizeFive`, strict Sepolia and matched-Hardhat validators, `compareRelevantContractSource`, and a coordinated summary builder.
+- CLI consumes exactly three explicit paths: raw Sepolia JSON, matched Hardhat JSON, and output summary JSON. It automatically reads the exact sibling `<matched-hardhat.json>.sha256` as the fourth protected filesystem endpoint.
 
 Use these analysis contracts:
 
 ```js
 // Documented shapes; implementation remains plain JavaScript.
-LocalGasReference = {
+MatchedHardhatReference = {
+  artifactKind: "bidsphere-sepolia-matched-hardhat",
   network: "hardhat",
-  batchSize: 10,
-  rows: 30,
-  codeVersion: string,
-  individualTotalGasMedian: number,
-  merkleBatchGasMedian: number
+  chainId: 31337,
+  storageTopology: "one-long-lived-contract-per-strategy",
+  codeVersion: string, // full 40-hex, equal to Sepolia raw
+  transactions: [/* canonical 68 status-one receipts */],
+  rounds: [/* 12 aggregates */],
+  finalMerkleBatchCount: 6
 };
 
 SourceComparison = {
@@ -535,24 +546,25 @@ SourceComparison = {
 };
 
 SepoliaBenchmarkSummary = {
-  source: string,
-  localSource: string,
   seriesId: string,
+  localReference: { seriesId: string, sha256: string, storageTopology: string },
   generatedAtUtc: string,
   method: "five recorded observations; median and min-max",
   batchSize: 10,
   recordedRounds: 5,
   individual: {
-    totalGas: { count: 5, min: number, median: number, max: number },
+    totalGas: { observations: string[5], statistics: { count: 5, min: string, median: string, max: string } },
     gasPerModel: { count: 5, min: number, median: number, max: number },
     roundEndToEndMs: { count: 5, min: number, median: number, max: number },
-    actualFeeWei: { count: 5, min: number, median: number, max: number }
+    actualFeeWei: { observations: string[5], statistics: object },
+    actualFeeEth: { observations: string[5], statistics: object }
   },
   merkle: {
-    totalGas: { count: 5, min: number, median: number, max: number },
+    totalGas: { observations: string[5], statistics: { count: 5, min: string, median: string, max: string } },
     gasPerModel: { count: 5, min: number, median: number, max: number },
     roundEndToEndMs: { count: 5, min: number, median: number, max: number },
-    actualFeeWei: { count: 5, min: number, median: number, max: number }
+    actualFeeWei: { observations: string[5], statistics: object },
+    actualFeeEth: { observations: string[5], statistics: object }
   },
   comparison: {
     sepoliaMerkleGasSavingPct: number,
@@ -579,7 +591,7 @@ Also assert that four or six values throw `/exactly five/`.
 
 - [ ] **Step 2: Write failing validation and comparison tests with literal raw fixtures**
 
-Build one completed fixture with 68 status-one transaction records, six rounds per strategy, and five non-warm-up aggregates. Assert the analyzer excludes warm-up, sums gas and fee exactly, calculates per-model gas, and compares Sepolia medians with a literal local reference `{ individualTotalGasMedian: 942130, merkleBatchGasMedian: 587661 }`. Mutate one receipt status and assert validation fails. Assert the serialized summary has no `p95` key.
+Build completed Sepolia and matched-Hardhat fixtures with 68 status-one transaction records, six rounds per strategy, two long-lived contracts, and five non-warm-up aggregates. Assert the analyzer excludes warm-up, preserves five observations in round order, sums gas and fee exactly, renders exact wei and deterministic ETH strings, and rejects broken `batchCount` progression, code-version mismatch, and the legacy CSV. Assert the serialized summary has no `p95`, `source`, or `localSource` key.
 
 - [ ] **Step 3: Run analysis tests and verify RED**
 
@@ -591,11 +603,15 @@ Expected: FAIL because the analyzer module does not exist.
 
 Validation requires network `sepolia`, chain ID `11155111`, status `completed`, 68 confirmed status-one transactions, ten-model batch size, one warm-up, five recorded rounds, two addresses, and arithmetic agreement among receipt gas, receipt fees, round totals, and experiment totals. `summarizeFive` sorts a copy and returns the middle value as median.
 
-- [ ] **Step 5: Implement local CSV reference and source-version limitation**
+- [ ] **Step 5: Implement matched Hardhat reference and source-version limitation**
 
-Parse the header by name, filter `network === "hardhat"` and `batch_size === "10"`, require 30 rows, and calculate medians from `individual_total_gas` and `merkle_batch_gas`. Carry the local raw commit value and Sepolia raw code version into the summary. Implement `compareRelevantContractSource` with `execFileSync("git", ["diff", "--quiet", localCommit, sepoliaCommit, "--", "contracts/contracts/ModelRegistry.sol"], { cwd: repositoryPath })`, distinguishing exit status 0 from a real diff or command error. Record both identifier equality and relevant-source equality; never infer bytecode identity from source equality.
+Validate Hardhat chain 31337, runtime/compiler metadata, deployed-bytecode hash syntax, canonical 68-operation/12-round topology, two addresses, all receipt and aggregate arithmetic, and Merkle counter progression `0 -> 1` through `5 -> 6`. Require the same full code-version identifier as Sepolia. Verify the sibling lowercase SHA-256 against exact JSON bytes. Keep source-comparison booleans, but exclude both commit identifiers from the processed output and never infer deployed Sepolia bytecode identity from source equality.
 
 - [ ] **Step 6: Implement the three-path CLI and package scripts**
+
+Protect the Sepolia JSON, matched JSON, checksum sibling, and output against
+resolved, symbolic-link, and hard-link aliasing before reading or writing the
+output. The legacy CSV remains valid for the original experiment only.
 
 ```json
 "analyze:sepolia-benchmark": "node scripts/analyze-sepolia-benchmark.mjs"
@@ -684,7 +700,12 @@ Communicate progress at least once per minute during the sequential receipts. Do
 
 - [ ] **Step 3: Validate completion before describing success**
 
-Run the analyzer against the exact raw path printed by the runner and `measurements/raw/gas-local-hardhat.csv`. The analyzer must reject an aborted or partial artifact. Independently verify 68 status-one receipts, arithmetic totals, no secret keys/literals, and two nonzero contract addresses.
+Run the analyzer against the exact raw path printed by the runner and the new
+Sepolia-matched Hardhat JSON. Its sibling `.sha256` must verify exact bytes.
+The analyzer must reject an aborted or partial Sepolia artifact, the legacy
+CSV, a broken matched topology, or a code-version mismatch. Independently
+verify 68 status-one receipts, arithmetic totals, no secret keys/literals, and
+two nonzero contract addresses in each environment.
 
 - [ ] **Step 4: Cross-check cost and relevant source history**
 
