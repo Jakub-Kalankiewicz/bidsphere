@@ -8,10 +8,12 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
+  analyzeMatchedBenchmark,
   analyzeSepoliaBenchmark,
   compareRelevantContractSource,
   parseLocalBatchTenCsv,
   summarizeFive,
+  validateCompletedMatchedHardhatResult,
   validateCompletedSepoliaResult,
 } from "../scripts/analyze-sepolia-benchmark.mjs";
 
@@ -240,6 +242,115 @@ function createCompletedRaw() {
     runtime: { node: "v24.0.0", hardhat: "3.0.0" },
   };
 }
+
+function createMatchedRaw(codeVersion = "0123456789abcdef0123456789abcdef01234567") {
+  const original = createCompletedRaw();
+  const transactions = original.transactions.map((record) => {
+    const merkle = record.kind === "merkle-registration";
+    return {
+      ...record,
+      merkleBatchCountBefore: merkle ? record.round : null,
+      merkleBatchCountAfter: merkle ? record.round + 1 : null,
+    };
+  });
+  return {
+    schemaVersion: 1,
+    artifactKind: "bidsphere-sepolia-matched-hardhat",
+    seriesId: original.seriesId,
+    startedAtUtc: original.startedAtUtc,
+    completedAtUtc: original.completedAtUtc,
+    network: "hardhat",
+    chainId: 31337,
+    codeVersion,
+    storageTopology: "one-long-lived-contract-per-strategy",
+    runtime: {
+      node: "v24.19.0",
+      hardhat: "2.28.6",
+      solidityCompiler: {
+        version: "0.8.19",
+        optimizerEnabled: false,
+        optimizerRuns: 200,
+      },
+    },
+    deployedBytecodeKeccak256: `0x${"ab".repeat(32)}`,
+    configuration: {
+      batchSize: 10,
+      warmupRounds: 1,
+      recordedRounds: 5,
+      operationCount: 68,
+    },
+    contractAddresses: original.contractAddresses,
+    plannedOperations: original.plannedOperations,
+    transactions,
+    rounds: original.rounds,
+    finalMerkleBatchCount: 6,
+    totalGasUsed: original.totalGasUsed,
+    totalActualFeeWei: original.totalActualFeeWei,
+  };
+}
+
+test("validates the matched long-lived topology and emits exact five-observation summaries", () => {
+  const codeVersion = "0123456789abcdef0123456789abcdef01234567";
+  const local = createMatchedRaw(codeVersion);
+  validateCompletedMatchedHardhatResult(local);
+  const summary = analyzeMatchedBenchmark(
+    { ...createCompletedRaw(), codeVersion },
+    local,
+    "a".repeat(64),
+    {
+      codeVersionIdentifiersMatch: true,
+      modelRegistrySourceUnchanged: true,
+      bytecodeIdentityClaimed: false,
+    }
+  );
+
+  assert.equal(summary.localReference.seriesId, local.seriesId);
+  assert.equal(summary.localReference.sha256, "a".repeat(64));
+  assert.deepEqual(summary.individual.totalGas.observations, ["940000", "942130", "950000", "930000", "945000"]);
+  assert.deepEqual(summary.individual.totalGas.statistics, {
+    count: 5,
+    min: "930000",
+    median: "942130",
+    max: "950000",
+  });
+  assert.deepEqual(summary.merkle.actualFeeWei.observations, ["1160000", "1175322", "1180000", "1140000", "1200000"]);
+  assert.deepEqual(summary.merkle.actualFeeEth.observations, [
+    "0.00000000000116",
+    "0.000000000001175322",
+    "0.00000000000118",
+    "0.00000000000114",
+    "0.0000000000012",
+  ]);
+  assert.equal(Object.hasOwn(summary, "source"), false);
+  assert.equal(Object.hasOwn(summary, "localSource"), false);
+  assert.equal(JSON.stringify(summary).includes(codeVersion), false);
+  assert.equal(JSON.stringify(summary).includes("p95"), false);
+});
+
+test("rejects non-matched local evidence, broken counters, and code-version mismatch", () => {
+  const wrongChain = createMatchedRaw();
+  wrongChain.chainId = 11155111;
+  assert.throws(() => validateCompletedMatchedHardhatResult(wrongChain), /chain ID/i);
+
+  const wrongTopology = createMatchedRaw();
+  wrongTopology.storageTopology = "fresh-contract-per-repetition";
+  assert.throws(() => validateCompletedMatchedHardhatResult(wrongTopology), /storage topology/i);
+
+  const wrongCounter = createMatchedRaw();
+  wrongCounter.transactions.find((record) => record.operationId === "merkle:3").merkleBatchCountBefore = 0;
+  assert.throws(() => validateCompletedMatchedHardhatResult(wrongCounter), /batch count/i);
+
+  const local = createMatchedRaw("1111111111111111111111111111111111111111");
+  const publicRaw = { ...createCompletedRaw(), codeVersion: "2222222222222222222222222222222222222222" };
+  assert.throws(
+    () => analyzeMatchedBenchmark(publicRaw, local, "a".repeat(64), {
+      codeVersionIdentifiersMatch: false,
+      modelRegistrySourceUnchanged: true,
+      bytecodeIdentityClaimed: false,
+    }),
+    /code version/i
+  );
+});
 
 test("summarizes exactly five observations without p95", () => {
   const values = [50, 10, 40, 20, 30];
@@ -492,60 +603,16 @@ test("CLI rejects any argument count other than exactly three paths", () => {
   }
 });
 
-test("CLI rejects resolved and symlink output aliases before reading or writing sources", () => {
-  const directory = mkdtempSync(join(tmpdir(), "bidsphere-analysis-alias-"));
-  const rawPath = join(directory, "raw.json");
-  const csvPath = join(directory, "local.csv");
-  const symlinkPath = join(directory, "raw-alias.json");
-  const rawBytes = "immutable raw benchmark bytes\n";
-  const csvBytes = "immutable local CSV bytes\n";
-  writeFileSync(rawPath, rawBytes);
-  writeFileSync(csvPath, csvBytes);
-  symlinkSync(rawPath, symlinkPath);
-
-  for (const outputPath of [rawPath, csvPath, symlinkPath]) {
-    const result = spawnSync(process.execPath, [analyzerPath, rawPath, csvPath, outputPath], {
-      cwd: repositoryRoot,
-      encoding: "utf8",
-    });
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /three distinct paths|path alias/i);
-    assert.equal(readFileSync(rawPath, "utf8"), rawBytes);
-    assert.equal(readFileSync(csvPath, "utf8"), csvBytes);
-  }
-});
-
-test("CLI rejects raw and CSV hard-link outputs before reading or writing sources", () => {
-  const directory = mkdtempSync(join(tmpdir(), "bidsphere-analysis-hard-link-"));
-  const rawPath = join(directory, "raw.json");
-  const csvPath = join(directory, "local.csv");
-  const outputPath = join(directory, "summary.json");
-  const rawBytes = "immutable raw hard-link bytes\n";
-  const csvBytes = "immutable CSV hard-link bytes\n";
-  writeFileSync(rawPath, rawBytes);
-  writeFileSync(csvPath, csvBytes);
-
-  for (const sourcePath of [rawPath, csvPath]) {
-    linkSync(sourcePath, outputPath);
-    const result = spawnSync(process.execPath, [analyzerPath, rawPath, csvPath, outputPath], {
-      cwd: repositoryRoot,
-      encoding: "utf8",
-    });
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /three distinct paths|path alias/i);
-    assert.equal(readFileSync(rawPath, "utf8"), rawBytes);
-    assert.equal(readFileSync(csvPath, "utf8"), csvBytes);
-    unlinkSync(outputPath);
-  }
-});
-
-test("CLI imports without side effects and writes a summary to a new nested directory", () => {
+test("CLI imports without side effects", () => {
   const importResult = spawnSync(process.execPath, ["--input-type=module", "--eval", `import(${JSON.stringify(pathToFileURL(analyzerPath).href)})`], { encoding: "utf8" });
   assert.equal(importResult.status, 0, importResult.stderr);
   assert.equal(importResult.stdout, "");
   assert.equal(importResult.stderr, "");
 
-  const directory = mkdtempSync(join(tmpdir(), "bidsphere-analysis-cli-"));
+});
+
+test("CLI accepts a matched JSON sibling digest and rejects the legacy CSV", () => {
+  const directory = mkdtempSync(join(tmpdir(), "bidsphere-matched-analysis-cli-"));
   execFileSync("git", ["init", "--quiet"], { cwd: directory });
   execFileSync("git", ["config", "user.name", "Benchmark Test"], { cwd: directory });
   execFileSync("git", ["config", "user.email", "benchmark@example.invalid"], { cwd: directory });
@@ -553,28 +620,65 @@ test("CLI imports without side effects and writes a summary to a new nested dire
   mkdirSync(contractDirectory, { recursive: true });
   writeFileSync(join(contractDirectory, "ModelRegistry.sol"), "contract ModelRegistry {}\n");
   execFileSync("git", ["add", "contracts/contracts/ModelRegistry.sol"], { cwd: directory });
-  execFileSync("git", ["commit", "--quiet", "-m", "local source"], { cwd: directory });
-  const localCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8" }).trim();
-  writeFileSync(join(directory, "README.md"), "Sepolia series metadata\n");
-  execFileSync("git", ["add", "README.md"], { cwd: directory });
-  execFileSync("git", ["commit", "--quiet", "-m", "Sepolia version"], { cwd: directory });
-  const sepoliaCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8" }).trim();
+  execFileSync("git", ["commit", "--quiet", "-m", "matched source"], { cwd: directory });
+  const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8" }).trim();
+  const publicRaw = { ...createCompletedRaw(), codeVersion: commit };
+  const localRaw = createMatchedRaw(commit);
+  const publicPath = join(directory, "public.json");
+  const localPath = join(directory, "local.json");
+  const outputPath = join(directory, "summary.json");
+  const localBytes = `${JSON.stringify(localRaw)}\n`;
+  writeFileSync(publicPath, JSON.stringify(publicRaw));
+  writeFileSync(localPath, localBytes);
+  writeFileSync(`${localPath}.sha256`, `${createHash("sha256").update(localBytes).digest("hex")}\n`);
 
-  const raw = { ...createCompletedRaw(), codeVersion: sepoliaCommit };
-  const rawPath = join(directory, "raw.json");
-  const csvPath = join(directory, "local.csv");
-  const outputPath = join(directory, "measurements", "processed", "summary.json");
-  writeFileSync(rawPath, JSON.stringify(raw));
-  writeFileSync(csvPath, LOCAL_CSV.replaceAll("local-commit", localCommit));
-
-  const result = spawnSync(process.execPath, [analyzerPath, rawPath, csvPath, outputPath], {
+  const accepted = spawnSync(process.execPath, [analyzerPath, publicPath, localPath, outputPath], {
     cwd: directory,
     encoding: "utf8",
   });
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(existsSync(outputPath), true);
+  assert.equal(accepted.status, 0, accepted.stderr);
   const summary = JSON.parse(readFileSync(outputPath, "utf8"));
-  assert.equal(summary.source, sepoliaCommit);
-  assert.equal(summary.localSource, localCommit);
-  assert.equal(JSON.stringify(summary).includes("p95"), false);
+  assert.equal(summary.localReference.seriesId, localRaw.seriesId);
+  assert.equal(Object.hasOwn(summary, "source"), false);
+
+  writeFileSync(localPath, LOCAL_CSV);
+  writeFileSync(`${localPath}.sha256`, `${createHash("sha256").update(LOCAL_CSV).digest("hex")}\n`);
+  const legacy = spawnSync(process.execPath, [analyzerPath, publicPath, localPath, outputPath], {
+    cwd: directory,
+    encoding: "utf8",
+  });
+  assert.notEqual(legacy.status, 0);
+  assert.match(legacy.stderr, /JSON|matched/i);
+});
+
+test("CLI verifies the exact sibling digest and protects all four filesystem endpoints", () => {
+  const directory = mkdtempSync(join(tmpdir(), "bidsphere-matched-analysis-digest-"));
+  const publicPath = join(directory, "public.json");
+  const localPath = join(directory, "local.json");
+  const digestPath = `${localPath}.sha256`;
+  const outputPath = join(directory, "summary.json");
+  writeFileSync(publicPath, "{}\n");
+  writeFileSync(localPath, "{}\n");
+  writeFileSync(digestPath, `${"a".repeat(64)}\n`);
+
+  const mismatch = spawnSync(process.execPath, [analyzerPath, publicPath, localPath, outputPath], {
+    cwd: directory,
+    encoding: "utf8",
+  });
+  assert.notEqual(mismatch.status, 0);
+  assert.match(mismatch.stderr, /SHA-256|digest/i);
+
+  for (const protectedPath of [publicPath, localPath, digestPath]) {
+    for (const makeAlias of [linkSync, symlinkSync]) {
+      const aliasOutput = join(directory, `alias-${protectedPath.length}-${makeAlias.name}`);
+      makeAlias(protectedPath, aliasOutput);
+      const result = spawnSync(process.execPath, [analyzerPath, publicPath, localPath, aliasOutput], {
+        cwd: directory,
+        encoding: "utf8",
+      });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /distinct paths|path alias/i);
+      unlinkSync(aliasOutput);
+    }
+  }
 });

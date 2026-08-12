@@ -316,6 +316,213 @@ export function validateCompletedSepoliaResult(rawValue) {
   }
 }
 
+function assertPublicMatchedMetadata(value, path = "local artifact") {
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => assertPublicMatchedMetadata(entry, `${path}[${index}]`));
+    return;
+  }
+  if (value === null || typeof value !== "object") {
+    if (typeof value === "string" && /https?:\/\//i.test(value)) {
+      throw new Error(`Invalid matched Hardhat benchmark: ${path} contains a URL`);
+    }
+    return;
+  }
+  for (const [key, nested] of Object.entries(value)) {
+    if (/(?:private.?key|rpc.?url|secret|password|cookie|access.?token)/i.test(key)) {
+      throw new Error(`Invalid matched Hardhat benchmark: ${path}.${key} is secret-shaped metadata`);
+    }
+    assertPublicMatchedMetadata(nested, `${path}.${key}`);
+  }
+}
+
+export function validateCompletedMatchedHardhatResult(rawValue) {
+  const raw = requireObject(rawValue, "matched Hardhat result");
+  const matchedFail = (message) => {
+    throw new Error(`Invalid matched Hardhat benchmark: ${message}`);
+  };
+  if (raw.schemaVersion !== 1 || raw.artifactKind !== "bidsphere-sepolia-matched-hardhat") {
+    matchedFail("schema and artifact kind must identify the matched reference");
+  }
+  if (raw.network !== "hardhat") matchedFail('network must be "hardhat"');
+  if (raw.chainId !== 31337) matchedFail("chain ID must be 31337");
+  if (raw.storageTopology !== "one-long-lived-contract-per-strategy") {
+    matchedFail("storage topology must use one long-lived contract per strategy");
+  }
+  if (typeof raw.codeVersion !== "string" || !FULL_COMMIT_PATTERN.test(raw.codeVersion)) {
+    matchedFail("code version must be a full 40-character hexadecimal commit identifier");
+  }
+  if (
+    typeof raw.seriesId !== "string" || raw.seriesId.length === 0 ||
+    typeof raw.startedAtUtc !== "string" || Number.isNaN(Date.parse(raw.startedAtUtc)) ||
+    typeof raw.completedAtUtc !== "string" || Number.isNaN(Date.parse(raw.completedAtUtc))
+  ) {
+    matchedFail("series and UTC timestamps are required");
+  }
+  const runtime = requireObject(raw.runtime, "matched runtime");
+  const compiler = requireObject(runtime.solidityCompiler, "matched compiler settings");
+  if (
+    typeof runtime.node !== "string" || typeof runtime.hardhat !== "string" ||
+    compiler.version !== "0.8.19" || compiler.optimizerEnabled !== false ||
+    compiler.optimizerRuns !== 200
+  ) {
+    matchedFail("runtime and compiler settings are invalid");
+  }
+  if (!/^0x[0-9a-fA-F]{64}$/.test(raw.deployedBytecodeKeccak256)) {
+    matchedFail("deployed bytecode keccak must be recorded");
+  }
+  const configuration = requireObject(raw.configuration, "matched configuration");
+  if (
+    configuration.batchSize !== 10 || configuration.warmupRounds !== 1 ||
+    configuration.recordedRounds !== 5 || configuration.operationCount !== 68
+  ) {
+    matchedFail("configuration must describe batch 10, one warm-up, five recorded rounds, and 68 operations");
+  }
+
+  validateCompletedSepoliaResult({
+    ...raw,
+    network: "sepolia",
+    chainId: 11155111,
+    status: "completed",
+    abortReason: null,
+    configuration: {
+      ...configuration,
+      receiptConfirmations: 1,
+      receiptTimeoutMs: 600000,
+      aggregateGasCeiling: "16500000",
+      approvedMaximumWei: "1",
+    },
+    reservedPendingWei: "0",
+  });
+
+  const merkle = raw.transactions.filter((record) => record.kind === "merkle-registration");
+  if (
+    merkle.length !== 6 ||
+    merkle.some((record, index) =>
+      record.round !== index ||
+      record.merkleBatchCountBefore !== index ||
+      record.merkleBatchCountAfter !== index + 1
+    ) ||
+    raw.finalMerkleBatchCount !== 6
+  ) {
+    matchedFail("Merkle batch count must progress from 0 to 6 exactly once");
+  }
+  if (raw.transactions.some((record) =>
+    record.kind !== "merkle-registration" &&
+    (record.merkleBatchCountBefore !== null || record.merkleBatchCountAfter !== null)
+  )) {
+    matchedFail("only Merkle transactions may carry batch count observations");
+  }
+  assertPublicMatchedMetadata(raw);
+}
+
+function summarizeExactDecimalStrings(values) {
+  if (!Array.isArray(values) || values.length !== 5 || values.some((value) => !/^\d+$/.test(value))) {
+    throw new Error("Expected exactly five decimal-string observations");
+  }
+  const sorted = [...values].sort((left, right) => {
+    const a = BigInt(left);
+    const b = BigInt(right);
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+  return {
+    observations: [...values],
+    statistics: { count: 5, min: sorted[0], median: sorted[2], max: sorted[4] },
+  };
+}
+
+function weiToEthString(value) {
+  const wei = BigInt(value);
+  const whole = wei / 1_000_000_000_000_000_000n;
+  const remainder = wei % 1_000_000_000_000_000_000n;
+  if (remainder === 0n) return whole.toString();
+  const fraction = remainder.toString().padStart(18, "0").replace(/0+$/, "");
+  return `${whole}.${fraction}`;
+}
+
+function exactMetric(rounds, selector) {
+  return summarizeExactDecimalStrings(rounds.map(selector));
+}
+
+function numericMetric(rounds, selector) {
+  const observations = rounds.map(selector);
+  return { observations, statistics: summarizeFive(observations) };
+}
+
+export function analyzeMatchedBenchmark(raw, local, localDigestSha256, sourceComparison) {
+  validateCompletedSepoliaResult(raw);
+  validateCompletedMatchedHardhatResult(local);
+  if (typeof localDigestSha256 !== "string" || !/^[0-9a-f]{64}$/.test(localDigestSha256)) {
+    throw new Error("Matched local artifact SHA-256 must be lowercase hexadecimal");
+  }
+  if (
+    raw.codeVersion !== local.codeVersion ||
+    sourceComparison?.codeVersionIdentifiersMatch !== true ||
+    sourceComparison?.modelRegistrySourceUnchanged !== true ||
+    sourceComparison?.bytecodeIdentityClaimed !== false
+  ) {
+    throw new Error("Sepolia and matched Hardhat evidence must use the same code version and unchanged contract source");
+  }
+  const recorded = (artifact, strategy) => artifact.rounds
+    .filter((round) => round.strategy === strategy && round.warmup === false)
+    .sort((left, right) => left.round - right.round);
+  const strategySummary = (artifact, strategy) => {
+    const rounds = recorded(artifact, strategy);
+    const feeWei = rounds.map((round) => round.totalActualFeeWei);
+    const feeEth = feeWei.map(weiToEthString);
+    const feeStats = summarizeExactDecimalStrings(feeWei).statistics;
+    return {
+      totalGas: exactMetric(rounds, (round) => round.totalGasUsed),
+      gasPerModel: numericMetric(
+        rounds,
+        (round) => requireSafeNumber(BigInt(round.totalGasUsed), `${strategy} round gas`) / 10
+      ),
+      roundEndToEndMs: numericMetric(rounds, (round) => round.wallClockMs),
+      actualFeeWei: { observations: feeWei, statistics: feeStats },
+      actualFeeEth: {
+        observations: feeEth,
+        statistics: {
+          count: 5,
+          min: weiToEthString(feeStats.min),
+          median: weiToEthString(feeStats.median),
+          max: weiToEthString(feeStats.max),
+        },
+      },
+    };
+  };
+  const individual = strategySummary(raw, "individual");
+  const merkle = strategySummary(raw, "merkle");
+  const localIndividual = strategySummary(local, "individual");
+  const localMerkle = strategySummary(local, "merkle");
+  return {
+    seriesId: raw.seriesId,
+    localReference: {
+      seriesId: local.seriesId,
+      sha256: localDigestSha256,
+      storageTopology: local.storageTopology,
+    },
+    generatedAtUtc: new Date().toISOString(),
+    method: "five recorded observations; median and min-max",
+    batchSize: 10,
+    recordedRounds: 5,
+    individual,
+    merkle,
+    localMatched: { individual: localIndividual, merkle: localMerkle },
+    comparison: {
+      sepoliaMerkleGasSavingPct: gasSavingPercentage(Number(individual.totalGas.statistics.median), Number(merkle.totalGas.statistics.median)),
+      localMerkleGasSavingPct: gasSavingPercentage(Number(localIndividual.totalGas.statistics.median), Number(localMerkle.totalGas.statistics.median)),
+      individualGasDifferenceFromLocalPct: percentageDifference(Number(individual.totalGas.statistics.median), Number(localIndividual.totalGas.statistics.median)),
+      merkleGasDifferenceFromLocalPct: percentageDifference(Number(merkle.totalGas.statistics.median), Number(localMerkle.totalGas.statistics.median)),
+    },
+    sourceComparison: { ...sourceComparison },
+    limitations: [
+      "A single batch size (10 models) and five recorded observations per strategy were summarized.",
+      "Confirmation latency and fees reflect one time-dependent Sepolia public-network series and RPC path.",
+      "The matched Hardhat reference reproduces storage topology, not public-network timing or fee conditions.",
+      "Source equality and a local deployed-bytecode hash do not establish deployed Sepolia bytecode identity.",
+    ],
+  };
+}
+
 function parseCsv(csvText) {
   if (typeof csvText !== "string") throw new Error("Local benchmark CSV must be text");
   const rows = [];
@@ -562,42 +769,59 @@ function sameFileIdentity(left, right) {
 
 export async function main(args = process.argv.slice(2)) {
   if (args.length !== 3) {
-    throw new Error("Usage requires exactly three paths: <raw-sepolia.json> <local-hardhat.csv> <summary.json>");
+    throw new Error("Usage requires exactly three paths: <raw-sepolia.json> <matched-hardhat.json> <summary.json>");
   }
   const [rawArgument, localArgument, outputArgument] = args;
   const rawPath = resolve(rawArgument);
   const localPath = resolve(localArgument);
+  const localDigestPath = `${localPath}.sha256`;
   const outputPath = resolve(outputArgument);
-  const resolvedPaths = [rawPath, localPath, outputPath];
+  const resolvedPaths = [rawPath, localPath, localDigestPath, outputPath];
   if (new Set(resolvedPaths).size !== resolvedPaths.length) {
-    throw new Error("Analysis requires three distinct paths; path aliases are not allowed");
+    throw new Error("Analysis requires four distinct filesystem endpoints; path aliases are not allowed");
   }
   const canonicalPaths = await Promise.all([
     realpath(rawPath),
     realpath(localPath),
+    realpath(localDigestPath),
     existingOutputEndpoint(outputPath, realpath),
   ]);
   const existingCanonicalPaths = canonicalPaths.filter((path) => path !== null);
   if (new Set(existingCanonicalPaths).size !== existingCanonicalPaths.length) {
-    throw new Error("Analysis requires three distinct paths; path aliases are not allowed");
+    throw new Error("Analysis requires four distinct filesystem endpoints; path aliases are not allowed");
   }
   const identities = await Promise.all([
     stat(rawPath, { bigint: true }),
     stat(localPath, { bigint: true }),
+    stat(localDigestPath, { bigint: true }),
     existingOutputEndpoint(outputPath, (path) => stat(path, { bigint: true })),
   ]);
   for (let left = 0; left < identities.length; left += 1) {
     if (identities[left] === null) continue;
     for (let right = left + 1; right < identities.length; right += 1) {
       if (identities[right] !== null && sameFileIdentity(identities[left], identities[right])) {
-        throw new Error("Analysis requires three distinct paths; path aliases are not allowed");
+        throw new Error("Analysis requires four distinct filesystem endpoints; path aliases are not allowed");
       }
     }
   }
   const raw = JSON.parse(await readFile(rawPath, "utf8"));
-  const localReference = parseLocalBatchTenCsv(await readFile(localPath, "utf8"));
+  const localBytes = await readFile(localPath);
+  const digestText = await readFile(localDigestPath, "utf8");
+  if (!/^[0-9a-f]{64}\n$/.test(digestText)) {
+    throw new Error("Matched local artifact sibling SHA-256 must be lowercase 64-hex plus newline");
+  }
+  const localDigest = createHash("sha256").update(localBytes).digest("hex");
+  if (digestText !== `${localDigest}\n`) {
+    throw new Error("Matched local artifact SHA-256 digest does not match exact JSON bytes");
+  }
+  let localReference;
+  try {
+    localReference = JSON.parse(localBytes.toString("utf8"));
+  } catch (error) {
+    throw new Error("Matched local reference must be JSON; the legacy CSV remains valid only for the original thesis experiment", { cause: error });
+  }
   const sourceComparison = compareRelevantContractSource(process.cwd(), localReference.codeVersion, raw.codeVersion);
-  const summary = analyzeSepoliaBenchmark(raw, localReference, sourceComparison);
+  const summary = analyzeMatchedBenchmark(raw, localReference, localDigest, sourceComparison);
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
   console.log(`Saved Sepolia benchmark summary to ${outputPath}`);

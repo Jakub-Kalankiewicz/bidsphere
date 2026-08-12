@@ -7,6 +7,7 @@
     "test": "hardhat test",
     "test:gas": "REPORT_GAS=true hardhat test",
     "benchmark:gas": "hardhat run scripts/benchmark-gas.ts --network hardhat",
+    "benchmark:gas:sepolia-matched": "hardhat run scripts/benchmark-gas-sepolia-matched.ts --network hardhat",
     "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
     "deploy:fixture": "hardhat run scripts/deploy.ts --network fixture",
     "deploy:sepolia": "hardhat run scripts/deploy.ts --network sepolia",
