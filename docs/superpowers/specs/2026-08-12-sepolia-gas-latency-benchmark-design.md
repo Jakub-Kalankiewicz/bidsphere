@@ -1,0 +1,226 @@
+# Sepolia Gas and Confirmation-Latency Benchmark Design
+
+Date: 2026-08-12
+
+## Purpose
+
+The experiment provides a small external-validity check for the existing local
+Hardhat gas benchmark. It answers two narrowly defined questions:
+
+1. Does the gas advantage observed for a batch of ten models remain visible
+   when the same contract operations execute on Ethereum Sepolia?
+2. What transaction-confirmation latency and effective fee were observed on
+   Sepolia during this particular experiment?
+
+The experiment does not replace the controlled Hardhat benchmark and does not
+claim that its latency or fee results generalize to Ethereum mainnet, other RPC
+providers, or other time periods.
+
+## Selected Variant
+
+The benchmark uses one representative batch size of ten models, one warm-up
+round, and five recorded rounds. Two fresh `ModelRegistry` contracts isolate
+the strategies:
+
+- individual strategy: ten sequential `registerModel` transactions per round;
+- Merkle strategy: one `registerMerkleRoot` transaction containing ten model
+  identifiers per round.
+
+The complete experiment sends 68 transactions:
+
+- two contract deployments;
+- 60 individual registrations, including ten warm-up transactions;
+- six Merkle registrations, including one warm-up transaction.
+
+The warm-up round remains in the raw record, including its cost, but is
+excluded from descriptive statistics.
+
+## Local Reference
+
+The comparison source is `measurements/raw/gas-local-hardhat.csv`, restricted
+to batch size ten. The existing local measurements are approximately:
+
+- individual registration: 942,130 gas for ten models;
+- Merkle registration: 587,661 gas for ten models;
+- observed reduction: approximately 37.6% of total gas for the Merkle
+  strategy.
+
+The analysis must derive final reference values from the raw CSV rather than
+copying the approximate values above. Before comparison, it must confirm that
+the benchmark uses the same `ModelRegistry` contract behavior and report any
+known code-version difference as a limitation.
+
+## Execution Model
+
+Each strategy receives a separate fresh contract. Transactions are submitted
+sequentially from the dedicated Sepolia test wallet and awaited for one receipt
+confirmation before the next transaction is sent.
+
+Every round uses new, deterministic 24-character hexadecimal model identifiers
+to match the identifiers used in the local benchmark and to avoid overwriting
+existing storage slots. Merkle roots are deterministic for the series and
+round, but are unique between rounds.
+
+For every transaction, the runner records monotonic durations around these
+boundaries:
+
+- submission duration: immediately before the contract call until a
+  transaction response with a hash is returned;
+- confirmation duration: receipt wait beginning after the transaction hash is
+  available;
+- end-to-end duration: immediately before the contract call until the receipt
+  is available.
+
+For an individual round, the runner also records wall-clock duration from the
+start of the first registration until receipt of the tenth registration. The
+Merkle round duration is the end-to-end duration of its single transaction.
+Durations use a monotonic clock; corresponding UTC timestamps provide audit
+context.
+
+## Recorded Data
+
+The raw artifact contains:
+
+- unique series identifier and UTC timestamps;
+- status: `running`, `completed`, or `aborted` with a reason;
+- Node.js, Hardhat, network and chain ID;
+- public deployer and contract addresses;
+- a code-version identifier retained only in raw research data;
+- batch size, warm-up count and recorded repetition count;
+- per-transaction strategy, round, sequence number and warm-up flag;
+- transaction hash, block number, receipt status and confirmation count;
+- gas estimate, configured gas limit, `gasUsed`, effective gas price and
+  actual fee in wei;
+- submission, confirmation and end-to-end durations;
+- per-round aggregate gas, fee and wall-clock duration;
+- total experiment gas and fee;
+- the user-approved maximum cost and remaining wallet balance checks.
+
+The artifact must not contain the private key, RPC URL, environment-variable
+values, cookies, or authenticated application data. An optional provider label
+may be stored only as a non-secret name supplied separately from the URL.
+
+## Output and Checkpointing
+
+The canonical raw result is written to:
+
+`measurements/raw/sepolia/sepolia-gas-latency-<timestamp>.json`
+
+The runner updates a temporary checkpoint after every confirmed transaction
+and atomically renames it into place. If the experiment stops after some
+transactions have been sent, the retained artifact has status `aborted`, lists
+the completed operations, and reports the actual partial cost. A rerun creates
+a new series instead of appending to or overwriting the previous one.
+
+A separate analysis step writes a derived summary under
+`measurements/processed/`. The raw artifact is never modified by analysis.
+
+## Descriptive Analysis
+
+For five recorded rounds, the report includes:
+
+- all observed values;
+- median and min-max range;
+- total gas and gas per model;
+- actual fee in wei and Sepolia ETH;
+- individual-round and Merkle-round confirmation durations;
+- relative difference between the two strategies;
+- difference between Sepolia gas use and the local Hardhat reference.
+
+The report does not calculate p95 or perform inferential hypothesis tests for
+five observations. Fee conversion to PLN or another currency is excluded
+unless a dated exchange-rate source and explicit assumptions are added later.
+
+## Safety and Spend Control
+
+The workflow is divided into a no-transaction preflight and a separately
+confirmed execution.
+
+The preflight:
+
+1. verifies Sepolia and chain ID 11155111;
+2. verifies the dedicated wallet, contract artifact and RPC connectivity;
+3. estimates both deployments and representative strategy transactions; the
+   interaction estimates use the existing smoke-test contract only after its
+   runtime bytecode and owner match the current artifact and test wallet;
+4. checks each estimate against an explicit per-transaction gas ceiling;
+5. calculates a conservative whole-experiment cost bound using all 68
+   transaction ceilings and current fee data;
+6. checks the wallet balance;
+7. prints the bound without sending a transaction or exposing secrets.
+
+After the user approves a specific maximum amount in wei, execution requires
+that amount as an explicit configuration value. Before every transaction, the
+runner obtains current fee data and verifies that:
+
+- the gas estimate remains below its transaction ceiling;
+- cumulative actual spending plus the next transaction's worst-case cost does
+  not exceed the approved whole-experiment maximum;
+- the wallet balance covers the next worst-case cost.
+
+Any failed check stops before the next transaction. A receipt with a status
+other than one, an RPC failure, or an unexpected chain ID aborts the series and
+preserves the partial artifact. Receipt waiting has a ten-minute timeout. A
+timeout records the already-broadcast transaction as pending, stops before any
+later transaction, and retains that transaction's worst-case cost within the
+approved budget because it may still be mined. The runner never silently
+raises a gas or total-cost ceiling.
+
+The implementation uses these per-transaction ceilings:
+
+- deployment: 1,500,000 gas per contract;
+- individual registration: 150,000 gas per model;
+- Merkle registration for ten models: 750,000 gas per batch.
+
+These ceilings produce a maximum aggregate allowance of 16,500,000 gas. The
+actual approved Sepolia-ETH amount is calculated from fresh fee data and must
+be confirmed separately before execution. If preflight estimation exceeds a
+ceiling, execution remains blocked until the design and tests are deliberately
+revised; preflight does not modify a ceiling.
+
+## Verification and Tests
+
+Implementation follows test-driven development. Automated tests cover:
+
+- exact operation count of 68 and separation of warm-up from recorded rounds;
+- unique 24-character identifiers;
+- aggregation of ten individual transactions into one round;
+- duration, gas and fee calculations from literal fixtures;
+- rejection of the wrong chain, missing configuration and invalid ceilings;
+- enforcement of the approved cumulative cost before each send;
+- secret-free serialization;
+- atomic checkpoint and completed/aborted result behavior;
+- analysis of five observations using median and min-max without p95.
+
+Before execution, the existing verifier and contract suites must still pass on
+Node.js 24. After execution, the raw artifact is validated against its schema,
+receipt statuses and arithmetic totals before any thesis documentation is
+changed.
+
+## Thesis Interpretation
+
+The Sepolia result is reported as an external-validity observation, separate
+from the main Hardhat benchmark. Gas-unit agreement can strengthen the claim
+that the measured contract-level difference is not an artifact of the local
+node. Confirmation time, effective gas price and fee are reported only as
+conditions observed during the dated series.
+
+No Sepolia value is inserted into the existing Hardhat tables. Any thesis
+change is limited to a separate short subsection, table, or limitation note
+after the result is complete and reproducible. Commit hashes remain confined
+to raw research metadata and are not placed in thesis prose, tables, captions,
+or bibliography entries.
+
+## Completion Criteria
+
+The experiment is complete only when:
+
+- preflight succeeds and the user explicitly approves its maximum cost;
+- both fresh contracts are deployed and all 68 receipts have status one;
+- the five recorded rounds contain complete gas, fee and timing data;
+- raw totals independently reconcile with receipt data; the wallet balance
+  delta is an additional cross-check when no other wallet activity occurred;
+- the processed summary reproduces the local comparison from raw inputs;
+- tests pass and working thesis records are updated without mixing networks;
+- limitations explicitly state the single batch size, five observations,
+  specific RPC path and time-dependent public-network conditions.
